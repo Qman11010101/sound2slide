@@ -1,4 +1,5 @@
 #Requires -Version 5.1
+param([switch]$Release)
 $ErrorActionPreference = "Stop"
 
 $cmakeCandidates = @(
@@ -17,7 +18,11 @@ foreach ($cmake in $cmakeCandidates) {
     }
 }
 $env:RUSTFLAGS = "-Ctarget-feature=+crt-static"
-cargo test --workspace --locked
+$cargoArguments = @("test", "--workspace", "--locked")
+if ($Release) {
+    $cargoArguments += "--release"
+}
+cargo @cargoArguments
 if ($LASTEXITCODE -ne 0) {
     throw "Cargo tests failed."
 }

@@ -27,8 +27,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Rust toolchain installation failed." }
       - name: Check formatting
         run: cargo fmt --all -- --check
-      - name: Run tests
-        run: ./scripts/test.ps1
+      - name: Run release tests
+        run: ./scripts/test.ps1 -Release
       - name: Build DLL and license notices
         run: ./scripts/build.ps1
       - name: Package release

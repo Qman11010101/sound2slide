@@ -29,3 +29,14 @@ To package exactly the DLL, INI, and notices into the release ZIP:
 ```powershell
 ./scripts/package-release.ps1
 ```
+
+The release profile uses `opt-level = "s"`, fat LTO, one code generation unit,
+and symbol stripping. Static MSVC CRT linking is enabled. Panic unwinding stays
+enabled because the plugin catches panics at the host ABI boundary and restores
+host windows after errors.
+
+To test with the release profile used by Windows CI:
+
+```powershell
+./scripts/test.ps1 -Release
+```
