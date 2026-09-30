@@ -16,3 +16,11 @@ repository = "https://github.com/Qman11010101/sound2slide"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+# ABI boundaries catch panics so the Margrete process and disabled host windows can recover.
+panic = "unwind"
