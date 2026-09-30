@@ -1,0 +1,15 @@
+/target/
+/dist/
+/terminals/
+
+*.rs.bk
+*.swp
+*.swo
+*~
+
+/.vs/
+/.idea/
+
+.DS_Store
+Thumbs.db
+Desktop.ini
