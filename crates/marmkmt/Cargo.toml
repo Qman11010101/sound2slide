@@ -1,0 +1,14 @@
+[package]
+name = "marmkmt"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+license-file.workspace = true
+repository.workspace = true
+
+[dependencies]
+marmkmt-sys = { path = "../marmkmt-sys" }
+
+[lints]
+workspace = true
