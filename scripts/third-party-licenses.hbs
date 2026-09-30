@@ -1,0 +1,28 @@
+Third-party licenses
+
+The following license notices cover Rust dependencies used by this project,
+including transitive dependencies and build tools for Windows x86_64.
+Licenses of dependencies remain separate from the project's MIT license.
+
+Source code for each registry crate, including MPL-2.0 components, is
+available from the versioned download URLs listed below. Extract the .crate
+archive to obtain the source code. MPL-2.0 source is provided under MPL-2.0.
+
+{{#each licenses}}
+========================================================================
+{{name}} ({{id}})
+
+Used by:
+{{#each used_by}}
+- {{crate.name}} {{crate.version}}
+{{#if crate.repository}}
+  Repository: {{{crate.repository}}}
+{{/if}}
+{{#if crate.source}}
+  Source: https://crates.io/api/v1/crates/{{crate.name}}/{{crate.version}}/download
+{{/if}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}

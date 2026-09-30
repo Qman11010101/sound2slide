@@ -1,0 +1,18 @@
+[workspace]
+members = [
+    "crates/marmkmt-sys",
+    "crates/marmkmt",
+    "plugin",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Kjuman Enobikto"]
+license = "MIT"
+license-file = "LICENSE.md"
+repository = "https://github.com/Qman11010101/sound2slide"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
