@@ -1,4 +1,4 @@
-use crate::generate::TICKS_PER_BEAT;
+use crate::{generate::TICKS_PER_BEAT, i18n::Msg};
 
 const TICKS_PER_BAR: i32 = TICKS_PER_BEAT * 4;
 const SCAN_BATCH: i32 = 4096;
@@ -23,9 +23,9 @@ pub(crate) struct PositionScan {
 }
 
 impl PositionScan {
-    pub fn new(start_tick: i32) -> Result<Self, String> {
+    pub fn new(start_tick: i32) -> Result<Self, Msg> {
         if start_tick < 0 {
-            return Err("現在位置が tick 0 より前のため、自動計算できません".into());
+            return Err(Msg::BeforeTickZero);
         }
         Ok(Self {
             start_tick,
@@ -36,9 +36,9 @@ impl PositionScan {
 
     pub fn advance(
         &mut self,
-        mut lookup_bpm: impl FnMut(i32) -> Result<Option<f64>, String>,
-        mut lookup_signature: impl FnMut(i32) -> Result<Option<[i32; 2]>, String>,
-    ) -> Result<Option<ChartPosition>, String> {
+        mut lookup_bpm: impl FnMut(i32) -> Result<Option<f64>, Msg>,
+        mut lookup_signature: impl FnMut(i32) -> Result<Option<[i32; 2]>, Msg>,
+    ) -> Result<Option<ChartPosition>, Msg> {
         for _ in 0..SCAN_BATCH {
             let tick = self.next_tick;
             if tick < 0 {
@@ -46,7 +46,7 @@ impl PositionScan {
             }
             let bpm = lookup_bpm(tick)?;
             if bpm.is_some_and(|bpm| !bpm.is_finite() || bpm <= 0.0) {
-                return Err(format!("tick {tick} のBPMが無効です"));
+                return Err(Msg::InvalidBpmAt(tick));
             }
             // Beat changes are indexed by bar, while Margrete uses 1920 ticks per bar.
             let signature = if tick % TICKS_PER_BAR == 0 {
@@ -57,7 +57,7 @@ impl PositionScan {
             if signature.is_some_and(|[numerator, denominator]| {
                 !(1..=16).contains(&numerator) || !(1..=480).contains(&denominator)
             }) {
-                return Err(format!("tick {tick} の拍子が無効です"));
+                return Err(Msg::InvalidSignatureAt(tick));
             }
             if bpm.is_some() || signature.is_some() {
                 self.changes.push(Change {
@@ -108,8 +108,8 @@ mod tests {
 
     fn calculate(
         start_tick: i32,
-        mut bpm: impl FnMut(i32) -> Result<Option<f64>, String>,
-        mut signature: impl FnMut(i32) -> Result<Option<[i32; 2]>, String>,
+        mut bpm: impl FnMut(i32) -> Result<Option<f64>, Msg>,
+        mut signature: impl FnMut(i32) -> Result<Option<[i32; 2]>, Msg>,
     ) -> ChartPosition {
         let mut scan = PositionScan::new(start_tick).unwrap();
         loop {

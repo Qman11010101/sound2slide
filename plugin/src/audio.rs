@@ -10,6 +10,8 @@ use symphonia::core::{
     probe::Hint,
 };
 
+use crate::i18n::Msg;
+
 pub(crate) struct Audio {
     pub samples: Arc<[f32]>,
     pub sample_rate: u32,
@@ -25,8 +27,8 @@ impl Audio {
     }
 }
 
-pub(crate) fn load(path: &Path) -> Result<Audio, String> {
-    let file = File::open(path).map_err(|error| format!("ファイルを開けません: {error}"))?;
+pub(crate) fn load(path: &Path) -> Result<Audio, Msg> {
+    let file = File::open(path).map_err(|error| Msg::OpenFile(error.to_string()))?;
     let stream = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
     if let Some(extension) = path.extension().and_then(|extension| extension.to_str()) {
@@ -39,28 +41,28 @@ pub(crate) fn load(path: &Path) -> Result<Audio, String> {
             &FormatOptions::default(),
             &MetadataOptions::default(),
         )
-        .map_err(|error| format!("対応していない音声形式です: {error}"))?;
+        .map_err(|error| Msg::UnsupportedFormat(error.to_string()))?;
     let mut format = probed.format;
     let track = format
         .tracks()
         .iter()
         .find(|track| track.codec_params.codec != CODEC_TYPE_NULL)
-        .ok_or("音声トラックがありません")?;
+        .ok_or(Msg::NoAudioTrack)?;
     let track_id = track.id;
     let sample_rate = track
         .codec_params
         .sample_rate
-        .ok_or("サンプルレートが不明です")?;
+        .ok_or(Msg::UnknownSampleRate)?;
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|error| format!("デコーダーを作成できません: {error}"))?;
+        .map_err(|error| Msg::CreateDecoder(error.to_string()))?;
     let mut samples = Vec::new();
     loop {
         let packet = match format.next_packet() {
             Ok(packet) => packet,
             Err(SymError::ResetRequired) => break,
             Err(SymError::IoError(_)) => break,
-            Err(error) => return Err(format!("音声の読み取りに失敗しました: {error}")),
+            Err(error) => return Err(Msg::ReadAudio(error.to_string())),
         };
         if packet.track_id() != track_id {
             continue;
@@ -68,7 +70,7 @@ pub(crate) fn load(path: &Path) -> Result<Audio, String> {
         let decoded = match decoder.decode(&packet) {
             Ok(decoded) => decoded,
             Err(SymError::DecodeError(_)) | Err(SymError::IoError(_)) => continue,
-            Err(error) => return Err(format!("デコードに失敗しました: {error}")),
+            Err(error) => return Err(Msg::Decode(error.to_string())),
         };
         let spec = *decoded.spec();
         let mut buffer = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
@@ -84,7 +86,7 @@ pub(crate) fn load(path: &Path) -> Result<Audio, String> {
         }
     }
     if samples.is_empty() {
-        return Err("音声サンプルを読み取れませんでした".into());
+        return Err(Msg::NoSamples);
     }
     Ok(Audio {
         samples: samples.into(),
