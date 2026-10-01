@@ -2,7 +2,7 @@ use std::{num::NonZeroU32, sync::Arc, time::Duration};
 
 use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 
-use crate::audio::Audio;
+use crate::{audio::Audio, i18n::Msg};
 
 pub(crate) fn preview_range(audio: &Audio, offset_sec: f64, length_sec: f64) -> Option<(f64, f64)> {
     if !offset_sec.is_finite() || !length_sec.is_finite() || audio.sample_rate == 0 {
@@ -26,7 +26,7 @@ pub(crate) struct Playback {
 }
 
 impl Playback {
-    pub fn start(audio: &Audio, offset_sec: f64, length_sec: f64) -> Result<Self, String> {
+    pub fn start(audio: &Audio, offset_sec: f64, length_sec: f64) -> Result<Self, Msg> {
         Self::start_at(audio, offset_sec, length_sec, offset_sec, false)
     }
 
@@ -36,14 +36,14 @@ impl Playback {
         length_sec: f64,
         position_sec: f64,
         paused: bool,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, Msg> {
         let source = PreviewSource::from_position(audio, offset_sec, length_sec, position_sec)?;
         let duration_sec = source
             .total_duration()
             .expect("finite source")
             .as_secs_f64();
         let device = DeviceSinkBuilder::open_default_sink()
-            .map_err(|error| format!("音声出力を開けません: {error}"))?;
+            .map_err(|error| Msg::OpenOutput(error.to_string()))?;
         let player = Player::connect_new(device.mixer());
         if paused {
             player.pause();
@@ -95,7 +95,7 @@ struct PreviewSource {
 
 impl PreviewSource {
     #[cfg(test)]
-    fn new(audio: &Audio, offset_sec: f64, length_sec: f64) -> Result<Self, String> {
+    fn new(audio: &Audio, offset_sec: f64, length_sec: f64) -> Result<Self, Msg> {
         Self::from_position(audio, offset_sec, length_sec, offset_sec)
     }
 
@@ -104,20 +104,20 @@ impl PreviewSource {
         offset_sec: f64,
         length_sec: f64,
         position_sec: f64,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, Msg> {
         let (start, end) =
-            preview_range(audio, offset_sec, length_sec).ok_or("再生できる範囲がありません")?;
+            preview_range(audio, offset_sec, length_sec).ok_or(Msg::NoPlaybackRange)?;
         if !position_sec.is_finite() || position_sec < start || position_sec >= end {
-            return Err("Playback position is outside the preview range".into());
+            return Err(Msg::PlaybackPositionOutOfRange);
         }
         let start = position_sec;
-        let sample_rate = NonZeroU32::new(audio.sample_rate).ok_or("サンプルレートが無効です")?;
+        let sample_rate = NonZeroU32::new(audio.sample_rate).ok_or(Msg::InvalidSampleRate)?;
         let first = (start * f64::from(audio.sample_rate)).round() as i64;
         let stop = (end * f64::from(audio.sample_rate)).round() as i64;
         let count =
-            usize::try_from(stop.saturating_sub(first)).map_err(|_| "再生範囲が長すぎます")?;
+            usize::try_from(stop.saturating_sub(first)).map_err(|_| Msg::PlaybackRangeTooLong)?;
         if count == 0 {
-            return Err("再生できる範囲がありません".into());
+            return Err(Msg::NoPlaybackRange);
         }
         Ok(Self {
             samples: Arc::clone(&audio.samples),

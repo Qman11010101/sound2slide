@@ -5,6 +5,7 @@ use eframe::egui;
 use crate::{
     audio::{self, Audio},
     generate::{self, Generated, Settings, SilentZone, Slide, TICKS_PER_BEAT, ticks_per_second},
+    i18n::{Lang, Msg},
     mgxc,
     modal::ModalHost,
     playback::{Playback, preview_range},
@@ -40,8 +41,8 @@ pub(crate) struct Commit {
 pub(crate) fn open(
     host: &ModalHost,
     start_tick: i32,
-    lookup_bpm: &dyn Fn(i32) -> Result<Option<f64>, String>,
-    lookup_signature: &dyn Fn(i32) -> Result<Option<[i32; 2]>, String>,
+    lookup_bpm: &dyn Fn(i32) -> Result<Option<f64>, Msg>,
+    lookup_signature: &dyn Fn(i32) -> Result<Option<[i32; 2]>, Msg>,
 ) -> Result<Option<Commit>, String> {
     let output = Arc::new(Mutex::new(None));
     let app_output = Arc::clone(&output);
@@ -60,10 +61,11 @@ pub(crate) fn open(
         options,
         Box::new(move |creation| {
             host.attach(creation).map_err(std::io::Error::other)?;
-            install_jp_font(&creation.egui_ctx);
             creation.egui_ctx.set_visuals(egui::Visuals::dark());
             let mut app = Sound2SlideApp::new(start_tick, app_output, lookup_bpm, lookup_signature);
             app.host = Some(host);
+            app.fonts = UiFonts::load();
+            app.fonts.apply(&creation.egui_ctx, app.lang);
             Ok(Box::new(app))
         }),
     )
@@ -93,9 +95,11 @@ struct Sound2SlideApp<'a> {
     start_tick: i32,
     audio: Option<Audio>,
     path: String,
-    status: String,
+    lang: Lang,
+    fonts: UiFonts,
+    status: Msg,
     settings: Settings,
-    bpm_note: String,
+    bpm_note: Vec<Msg>,
     transparent_steps: bool,
     lane_divisions: i32,
     generated: Generated,
@@ -107,10 +111,10 @@ struct Sound2SlideApp<'a> {
     cached_generation: u64,
     generation: u64,
     output: Arc<Mutex<Option<Commit>>>,
-    lookup_bpm: &'a dyn Fn(i32) -> Result<Option<f64>, String>,
-    lookup_signature: &'a dyn Fn(i32) -> Result<Option<[i32; 2]>, String>,
+    lookup_bpm: &'a dyn Fn(i32) -> Result<Option<f64>, Msg>,
+    lookup_signature: &'a dyn Fn(i32) -> Result<Option<[i32; 2]>, Msg>,
     playback: Option<Playback>,
-    playback_error: String,
+    playback_error: Option<Msg>,
     position_scan: Option<PositionScan>,
     offset_selection: Option<OffsetSelection>,
     show_open_source_libraries: bool,
@@ -120,8 +124,8 @@ impl<'a> Sound2SlideApp<'a> {
     fn new(
         start_tick: i32,
         output: Arc<Mutex<Option<Commit>>>,
-        lookup_bpm: &'a dyn Fn(i32) -> Result<Option<f64>, String>,
-        lookup_signature: &'a dyn Fn(i32) -> Result<Option<[i32; 2]>, String>,
+        lookup_bpm: &'a dyn Fn(i32) -> Result<Option<f64>, Msg>,
+        lookup_signature: &'a dyn Fn(i32) -> Result<Option<[i32; 2]>, Msg>,
     ) -> Self {
         let settings = Settings::default();
         Self {
@@ -129,9 +133,11 @@ impl<'a> Sound2SlideApp<'a> {
             start_tick,
             audio: None,
             path: String::new(),
-            status: "音声ファイルを開いてください".into(),
+            lang: Lang::default(),
+            fonts: UiFonts::default(),
+            status: Msg::OpenAudioPrompt,
             settings,
-            bpm_note: String::new(),
+            bpm_note: Vec::new(),
             transparent_steps: true,
             lane_divisions: 16,
             generated: Generated::default(),
@@ -146,7 +152,7 @@ impl<'a> Sound2SlideApp<'a> {
             lookup_bpm,
             lookup_signature,
             playback: None,
-            playback_error: String::new(),
+            playback_error: None,
             position_scan: None,
             offset_selection: None,
             show_open_source_libraries: false,
@@ -177,10 +183,19 @@ impl<'a> Sound2SlideApp<'a> {
     }
 
     fn open_file(&mut self, parent: &eframe::Frame) {
+        let lang = self.lang;
         let Some(path) = rfd::FileDialog::new()
-            .set_title("音声ファイルを開く")
+            .set_title(lang.pick([
+                "音声ファイルを開く",
+                "Open audio file",
+                "開啟音訊檔案",
+                "오디오 파일 열기",
+            ]))
             .set_parent(parent)
-            .add_filter("Audio", &["wav", "mp3", "flac", "ogg", "oga"])
+            .add_filter(
+                lang.pick(["音声", "Audio", "音訊", "오디오"]),
+                &["wav", "mp3", "flac", "ogg", "oga"],
+            )
             .pick_file()
         else {
             return;
@@ -192,9 +207,12 @@ impl<'a> Sound2SlideApp<'a> {
                 if offer_calculation
                     && rfd::MessageDialog::new()
                         .set_title("sound2slide")
-                        .set_description(
+                        .set_description(lang.pick([
                             "楽曲ファイルを検知しました。\n音声の開始位置を自動で計算しますか？",
-                        )
+                            "This looks like a song file.\nCalculate the audio start position automatically?",
+                            "偵測到樂曲檔案。\n要自動計算音訊的起始位置嗎？",
+                            "곡 파일이 감지되었습니다.\n오디오 시작 위치를 자동으로 계산할까요?",
+                        ]))
                         .set_buttons(rfd::MessageButtons::YesNo)
                         .set_parent(parent)
                         .show()
@@ -202,7 +220,7 @@ impl<'a> Sound2SlideApp<'a> {
                 {
                     match PositionScan::new(self.start_tick) {
                         Ok(scan) => self.position_scan = Some(scan),
-                        Err(error) => self.bpm_note = error,
+                        Err(error) => self.bpm_note = vec![error],
                     }
                 }
             }
@@ -216,9 +234,12 @@ impl<'a> Sound2SlideApp<'a> {
         self.zone_drag = None;
         self.position_scan = None;
         self.offset_selection = None;
-        self.playback_error.clear();
+        self.playback_error = None;
         self.bpm_note.clear();
-        self.status = format!("{:.2} 秒 / {} Hz", audio.duration_secs(), audio.sample_rate);
+        self.status = Msg::AudioInfo {
+            seconds: audio.duration_secs(),
+            sample_rate: audio.sample_rate,
+        };
         self.settings.offset_sec = 0.0;
         self.settings.length_sec = if audio.duration_secs() >= 60.0 {
             3.0
@@ -245,7 +266,7 @@ impl<'a> Sound2SlideApp<'a> {
             Ok(None) => ctx.request_repaint(),
             Err(error) => {
                 self.position_scan = None;
-                self.bpm_note = format!("開始位置を計算できません: {error}");
+                self.bpm_note = vec![Msg::PositionScanFailed(Box::new(error))];
             }
         }
     }
@@ -287,13 +308,19 @@ impl<'a> Sound2SlideApp<'a> {
     }
 
     fn offset_selection_dialog(&mut self, ctx: &egui::Context) {
+        let lang = self.lang;
         let Some(selection) = &mut self.offset_selection else {
             return;
         };
         let mut action = None;
         egui::Modal::new(egui::Id::new("mgxc_offset_selection")).show(ctx, |ui| {
             ui.set_max_width((ctx.content_rect().width() - 64.0).clamp(200.0, 440.0));
-            ui.label("どの譜面ファイルを元にオフセットを設定しますか？");
+            ui.label(lang.pick([
+                "どの譜面ファイルを元にオフセットを設定しますか？",
+                "Which chart file should the offset be taken from?",
+                "要依據哪個譜面檔案設定偏移？",
+                "어느 채보 파일을 기준으로 오프셋을 설정할까요?",
+            ]));
             ui.add_space(8.0);
             egui::ScrollArea::vertical()
                 .max_height((ctx.content_rect().height() * 0.5).min(300.0))
@@ -305,11 +332,22 @@ impl<'a> Sound2SlideApp<'a> {
                 });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button("オフセットを計算しない").clicked() {
-                    action = Some(false);
-                }
-                if ui.button("選択する").clicked() {
+                if ui
+                    .button(lang.pick(["選択する", "Select", "選擇", "선택"]))
+                    .clicked()
+                {
                     action = Some(true);
+                }
+                if ui
+                    .button(lang.pick([
+                        "オフセットを計算しない",
+                        "Don't apply an offset",
+                        "不計算偏移",
+                        "오프셋을 계산하지 않음",
+                    ]))
+                    .clicked()
+                {
+                    action = Some(false);
                 }
             });
         });
@@ -325,10 +363,7 @@ impl<'a> Sound2SlideApp<'a> {
         };
         let duration = audio.duration_secs();
         if !position.seconds.is_finite() || position.seconds >= duration {
-            self.bpm_note = format!(
-                "計算した開始位置（{:.3} 秒）が音声の範囲外です。始点を手動で設定してください。",
-                position.seconds
-            );
+            self.bpm_note = vec![Msg::PositionOutOfRange(position.seconds)];
             return;
         }
         self.settings.offset_sec = position.seconds;
@@ -338,14 +373,51 @@ impl<'a> Sound2SlideApp<'a> {
         self.bpm_note.clear();
     }
 
+    fn language_selector(&mut self, ui: &mut egui::Ui) {
+        let previous = self.lang;
+        egui::ComboBox::from_id_salt("language")
+            .selected_text(self.lang.name())
+            .show_ui(ui, |ui| {
+                for lang in Lang::ALL {
+                    ui.selectable_value(&mut self.lang, lang, lang.name());
+                }
+            })
+            .response
+            .on_hover_text(self.lang.pick(["言語", "Language", "語言", "언어"]));
+        if self.lang != previous {
+            self.fonts.apply(ui.ctx(), self.lang);
+            ui.ctx().request_repaint();
+        }
+    }
+
     fn controls(&mut self, ui: &mut egui::Ui, parent: &eframe::Frame) {
-        ui.heading("sound2slide");
-        ui.label(format!("開始 tick: {}", self.start_tick));
-        ui.label("このウィンドウを閉じるまで Margrete は待機します。");
+        ui.horizontal(|ui| {
+            ui.heading("sound2slide");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.language_selector(ui);
+            });
+        });
+        let lang = self.lang;
+        ui.label(format!(
+            "{} {}",
+            lang.pick(["開始 tick:", "Start tick:", "起始 tick：", "시작 tick:"]),
+            self.start_tick
+        ));
+        ui.label(lang.pick([
+            "このウィンドウを閉じるまで Margrete は待機します。",
+            "Margrete waits until this window is closed.",
+            "關閉此視窗前 Margrete 會保持等待。",
+            "이 창을 닫을 때까지 Margrete는 대기합니다.",
+        ]));
         if ui
             .add_enabled(
                 self.position_scan.is_none(),
-                egui::Button::new("音声を開く"),
+                egui::Button::new(lang.pick([
+                    "音声を開く",
+                    "Open audio",
+                    "開啟音訊",
+                    "오디오 열기",
+                ])),
             )
             .clicked()
         {
@@ -354,9 +426,14 @@ impl<'a> Sound2SlideApp<'a> {
         if !self.path.is_empty() {
             ui.add(egui::Label::new(&self.path).truncate());
         }
-        ui.label(&self.status);
+        ui.label(self.status.text(lang));
         if self.position_scan.is_some() {
-            ui.label("音声の開始位置を計算中…");
+            ui.label(lang.pick([
+                "音声の開始位置を計算中…",
+                "Calculating the audio start position…",
+                "正在計算音訊起始位置…",
+                "오디오 시작 위치를 계산하는 중…",
+            ]));
             ui.ctx().request_repaint();
             return;
         }
@@ -369,15 +446,24 @@ impl<'a> Sound2SlideApp<'a> {
                     .clamp_existing_to_range(false)
                     .speed(1.0),
             );
-            if ui.button("譜面から取得").clicked() {
+            if ui
+                .button(lang.pick([
+                    "譜面から取得",
+                    "Get from chart",
+                    "從譜面取得",
+                    "채보에서 가져오기",
+                ]))
+                .clicked()
+            {
                 self.take_chart_timing();
             }
         });
         if !self.bpm_note.is_empty() {
-            ui.label(&self.bpm_note);
+            let notes: Vec<String> = self.bpm_note.iter().map(|note| note.text(lang)).collect();
+            ui.label(notes.join(" / "));
         }
         ui.horizontal(|ui| {
-            ui.label("拍子");
+            ui.label(lang.pick(["拍子", "Time signature", "拍號", "박자"]));
             ui.add(
                 egui::DragValue::new(&mut self.settings.time_signature[0])
                     .range(1..=16)
@@ -392,9 +478,10 @@ impl<'a> Sound2SlideApp<'a> {
         });
         if let Some(audio) = &self.audio {
             let duration = audio.duration_secs();
-            ui.label("取り込む範囲");
+            let seconds = lang.pick(["秒", "s", "秒", "초"]);
+            ui.label(lang.pick(["取り込む範囲", "Import range", "匯入範圍", "가져올 범위"]));
             ui.horizontal(|ui| {
-                ui.label("始点");
+                ui.label(lang.pick(["始点", "Start", "起點", "시작점"]));
                 ui.add(
                     egui::DragValue::new(&mut self.settings.offset_sec)
                         .range(-60.0..=duration)
@@ -402,19 +489,19 @@ impl<'a> Sound2SlideApp<'a> {
                         .speed(0.01)
                         .max_decimals(3),
                 );
-                ui.label("秒");
+                ui.label(seconds);
             });
             let remaining = (duration - self.settings.offset_sec).max(0.0);
             self.settings.length_sec = self.settings.length_sec.min(remaining);
             ui.horizontal(|ui| {
-                ui.label("長さ");
+                ui.label(lang.pick(["長さ", "Length", "長度", "길이"]));
                 ui.add(
                     egui::DragValue::new(&mut self.settings.length_sec)
                         .range(remaining.min(0.05)..=remaining)
                         .speed(0.01)
                         .max_decimals(3),
                 );
-                ui.label("秒");
+                ui.label(seconds);
             });
         }
         self.settings.quantize_ticks = self.settings.quantize_ticks.clamp(1, 1920);
@@ -423,43 +510,109 @@ impl<'a> Sound2SlideApp<'a> {
             .find(|(ticks, _)| *ticks == self.settings.quantize_ticks)
             .map(|(_, name)| (*name).to_owned())
             .unwrap_or_else(|| format!("{} tick", self.settings.quantize_ticks));
-        egui::ComboBox::from_label("量子化")
-            .selected_text(selected)
-            .show_ui(ui, |ui| {
-                for (ticks, name) in QUANTIZE {
-                    ui.selectable_value(&mut self.settings.quantize_ticks, *ticks, *name);
-                }
-            });
-        ui.label("スライドの種類");
+        egui::ComboBox::new(
+            "quantize",
+            lang.pick(["量子化", "Quantize", "量化", "퀀타이즈"]),
+        )
+        .selected_text(selected)
+        .show_ui(ui, |ui| {
+            for (ticks, name) in QUANTIZE {
+                ui.selectable_value(&mut self.settings.quantize_ticks, *ticks, *name);
+            }
+        });
+        ui.separator();
+        ui.label(lang.pick([
+            "スライドの種類",
+            "Slide type",
+            "Slide 類型",
+            "슬라이드 종류",
+        ]));
         ui.horizontal(|ui| {
-            ui.radio_value(&mut self.settings.symmetric_width, false, "普通の波形");
-            ui.radio_value(&mut self.settings.symmetric_width, true, "左右対称");
+            ui.radio_value(
+                &mut self.settings.symmetric_width,
+                false,
+                lang.pick(["普通の波形", "Normal waveform", "一般波形", "일반 파형"]),
+            );
+            ui.radio_value(
+                &mut self.settings.symmetric_width,
+                true,
+                lang.pick(["左右対称", "Symmetric", "左右對稱", "좌우 대칭"]),
+            );
         });
         if !self.settings.symmetric_width {
-            ui.add(egui::Slider::new(&mut self.settings.width, 1..=16).text("幅"));
-            ui.checkbox(&mut self.settings.zigzag, "制御点を左右均等にする");
-            ui.checkbox(&mut self.settings.center_ends, "始点と終点を中央にする");
+            ui.add(
+                egui::Slider::new(&mut self.settings.width, 1..=16)
+                    .text(lang.pick(["幅", "Width", "寬度", "폭"])),
+            );
+            ui.checkbox(
+                &mut self.settings.zigzag,
+                lang.pick([
+                    "制御点を左右均等にする",
+                    "Balance control points left and right",
+                    "讓控制點左右均等",
+                    "제어점을 좌우 균등하게",
+                ]),
+            );
+            ui.checkbox(
+                &mut self.settings.center_ends,
+                lang.pick([
+                    "始点と終点を中央にする",
+                    "Center the start and end",
+                    "起點與終點置中",
+                    "시작점과 끝점을 가운데로",
+                ]),
+            );
         }
         ui.add(
-            egui::Slider::new(&mut self.settings.silence_threshold, 0.0..=0.5).text("無音しきい値"),
+            egui::Slider::new(&mut self.settings.silence_threshold, 0.0..=0.5).text(lang.pick([
+                "無音しきい値",
+                "Silence threshold",
+                "靜音閾值",
+                "무음 임계값",
+            ])),
         );
-        ui.add(egui::Slider::new(&mut self.settings.smooth, 0..=8).text("平滑化"));
+        ui.add(
+            egui::Slider::new(&mut self.settings.smooth, 0..=8).text(lang.pick([
+                "平滑化",
+                "Smoothing",
+                "平滑化",
+                "평활화",
+            ])),
+        );
         ui.checkbox(
             &mut self.settings.remove_silent_points,
-            "無音部分の制御点・中継点をなくす",
+            lang.pick([
+                "無音部分の制御点・中継点をなくす",
+                "Remove control and step points in silent parts",
+                "移除靜音部分的控制點與中繼點",
+                "무음 구간의 제어점·중계점 없애기",
+            ]),
         );
         if !self.settings.symmetric_width {
             self.settings.max_width = self.settings.max_width.max(self.settings.width);
         }
-        ui.add(egui::Slider::new(&mut self.settings.max_width, 2..=16).text("最大幅"))
-            .on_hover_text("波形全体の最大幅。普通の波形ではノート幅以上になります。");
+        ui.add(
+            egui::Slider::new(&mut self.settings.max_width, 2..=16)
+                .text(lang.pick(["最大幅", "Max width", "最大寬度", "최대 폭"])),
+        )
+        .on_hover_text(lang.pick([
+            "波形全体の最大幅。普通の波形ではノート幅以上になります。",
+            "Maximum width of the whole waveform. A normal waveform is at least as wide as the note width.",
+            "整體波形的最大寬度。一般波形時不會小於音符寬度。",
+            "파형 전체의 최대 폭입니다. 일반 파형에서는 노트 폭 이상이 됩니다.",
+        ]));
         if !self.settings.symmetric_width && self.settings.max_width < self.settings.width {
             self.settings.max_width = self.settings.width;
             ui.ctx().request_repaint();
         }
         ui.checkbox(
             &mut self.transparent_steps,
-            "中継点を透明にする（節を置かない）",
+            lang.pick([
+                "中継点を透明にする（節を置かない）",
+                "Make step points invisible (no joints)",
+                "中繼點設為透明（不放置節點）",
+                "중계점을 투명하게 (마디를 두지 않음)",
+            ]),
         );
         ui.separator();
         let notes: usize = self
@@ -476,14 +629,29 @@ impl<'a> Sound2SlideApp<'a> {
                 }
             })
             .sum();
-        ui.label(format!("ノート {notes} 個"));
+        ui.label(lang.pick([
+            format!("ノート {notes} 個"),
+            format!("{notes} notes"),
+            format!("{notes} 個音符"),
+            format!("노트 {notes}개"),
+        ]));
         if self.generated.truncated {
             ui.colored_label(
                 egui::Color32::from_rgb(255, 180, 80),
-                "点数上限に達したため、後ろを切り捨てました。量子化を粗くするか長さを短くしてください。",
+                lang.pick([
+                    "点数上限に達したため、後ろを切り捨てました。量子化を粗くするか長さを短くしてください。",
+                    "The point limit was reached, so the end was cut off. Use a coarser quantize or a shorter length.",
+                    "已達點數上限，後段已被截斷。請將量化調粗或縮短長度。",
+                    "점 개수 상한에 도달하여 뒷부분을 잘라냈습니다. 퀀타이즈를 거칠게 하거나 길이를 줄여 주세요.",
+                ]),
             );
         }
-        let label = format!("譜面に追加（{notes} ノート）");
+        let label = lang.pick([
+            format!("譜面に追加（{notes} ノート）"),
+            format!("Add to chart ({notes} notes)"),
+            format!("加入譜面（{notes} 個音符）"),
+            format!("채보에 추가 (노트 {notes}개)"),
+        ]);
         if ui
             .add_enabled(notes > 0, egui::Button::new(label))
             .clicked()
@@ -498,7 +666,10 @@ impl<'a> Sound2SlideApp<'a> {
                 .unwrap_or_else(|error| error.into_inner()) = Some(commit);
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        if ui.button("閉じる").clicked() {
+        if ui
+            .button(lang.pick(["閉じる", "Close", "關閉", "닫기"]))
+            .clicked()
+        {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
@@ -506,8 +677,8 @@ impl<'a> Sound2SlideApp<'a> {
 
 fn event_walking_back<T>(
     start_position: i32,
-    mut lookup: impl FnMut(i32) -> Result<Option<T>, String>,
-) -> Result<Option<T>, String> {
+    mut lookup: impl FnMut(i32) -> Result<Option<T>, Msg>,
+) -> Result<Option<T>, Msg> {
     let mut position = start_position;
     loop {
         if let Some(value) = lookup(position)? {
@@ -559,19 +730,20 @@ impl Sound2SlideApp<'_> {
                 .inner
             })
             .inner;
-        if !self.playback_error.is_empty() {
-            ui.colored_label(egui::Color32::LIGHT_RED, &self.playback_error);
+        let lang = self.lang;
+        if let Some(error) = &self.playback_error {
+            ui.colored_label(egui::Color32::LIGHT_RED, error.text(lang));
         }
         ui.horizontal(|ui| {
-            ui.label("表示設定");
+            ui.label(lang.pick(["表示設定", "Display", "顯示設定", "표시 설정"]));
             egui::ComboBox::from_id_salt("lane_divisions")
-                .selected_text(lane_division_label(self.lane_divisions))
+                .selected_text(lane_division_label(self.lane_divisions, lang))
                 .show_ui(ui, |ui| {
                     for divisions in [16, 8, 4, 2, 0] {
                         ui.selectable_value(
                             &mut self.lane_divisions,
                             divisions,
-                            lane_division_label(divisions),
+                            lane_division_label(divisions, lang),
                         );
                     }
                 });
@@ -581,6 +753,7 @@ impl Sound2SlideApp<'_> {
     }
 
     fn silent_zone_button(&mut self, ui: &mut egui::Ui) -> egui::Response {
+        let lang = self.lang;
         let response = ui
             .add_enabled(
                 self.audio.is_some(),
@@ -588,13 +761,23 @@ impl Sound2SlideApp<'_> {
                     .min_size(egui::vec2(28.0, 24.0))
                     .selected(self.editing_silent_zones),
             )
-            .on_hover_text("サイレントゾーン設定：縦ドラッグで追加・上下の境界や秒数で調整");
+            .on_hover_text(lang.pick([
+                "サイレントゾーン設定：縦ドラッグで追加・上下の境界や秒数で調整",
+                "Silent zones: drag vertically to add; adjust with the top and bottom edges or the seconds",
+                "靜音區設定：縱向拖曳以新增，可用上下邊界或秒數調整",
+                "무음 구간 설정: 세로로 드래그하여 추가, 위아래 경계나 초 값으로 조정",
+            ]));
         response.widget_info(|| {
             egui::WidgetInfo::selected(
                 egui::WidgetType::Button,
                 self.audio.is_some(),
                 self.editing_silent_zones,
-                "サイレントゾーン設定",
+                lang.pick([
+                    "サイレントゾーン設定",
+                    "Silent zones",
+                    "靜音區設定",
+                    "무음 구간 설정",
+                ]),
             )
         });
         let center = response.rect.center();
@@ -649,6 +832,8 @@ impl Sound2SlideApp<'_> {
         }
         let span = end - start;
         let minimum = 1.0 / f64::from(self.audio.as_ref().unwrap().sample_rate);
+        let lang = self.lang;
+        let suffix = lang.pick([" 秒", " s", " 秒", "초"]);
         let time_y = |elapsed: f64| {
             inner.bottom() - (elapsed / span).clamp(0.0, 1.0) as f32 * inner.height()
         };
@@ -700,9 +885,14 @@ impl Sound2SlideApp<'_> {
                             .clamp_existing_to_range(false)
                             .speed(0.001)
                             .max_decimals(3)
-                            .suffix(" 秒"),
+                            .suffix(suffix),
                     )
-                    .on_hover_text("サイレントゾーン開始（取り込み開始からの経過秒数）")
+                    .on_hover_text(lang.pick([
+                        "サイレントゾーン開始（取り込み開始からの経過秒数）",
+                        "Silent zone start (seconds from the import start)",
+                        "靜音區開始（自匯入起點起算的秒數）",
+                        "무음 구간 시작 (가져오기 시작부터의 경과 초)",
+                    ]))
                     .changed()
                 })
                 .inner;
@@ -715,9 +905,14 @@ impl Sound2SlideApp<'_> {
                             .clamp_existing_to_range(false)
                             .speed(0.001)
                             .max_decimals(3)
-                            .suffix(" 秒"),
+                            .suffix(suffix),
                     )
-                    .on_hover_text("サイレントゾーン終了（取り込み開始からの経過秒数）")
+                    .on_hover_text(lang.pick([
+                        "サイレントゾーン終了（取り込み開始からの経過秒数）",
+                        "Silent zone end (seconds from the import start)",
+                        "靜音區結束（自匯入起點起算的秒數）",
+                        "무음 구간 끝 (가져오기 시작부터의 경과 초)",
+                    ]))
                     .changed()
                 })
                 .inner;
@@ -731,7 +926,12 @@ impl Sound2SlideApp<'_> {
             if ui
                 .push_id(("delete_silent_zone", index), |ui| {
                     ui.put(delete_rect, egui::Button::new("×"))
-                        .on_hover_text("サイレントゾーンを削除")
+                        .on_hover_text(lang.pick([
+                            "サイレントゾーンを削除",
+                            "Delete silent zone",
+                            "刪除靜音區",
+                            "무음 구간 삭제",
+                        ]))
                         .clicked()
                 })
                 .inner
@@ -804,7 +1004,7 @@ impl Sound2SlideApp<'_> {
             Ok(Some(bpm)) => {
                 self.settings.bpm = bpm;
             }
-            Ok(None) => notes.push("BPMイベントは見つかりませんでした".into()),
+            Ok(None) => notes.push(Msg::BpmEventNotFound),
             Err(message) => notes.push(message),
         }
         // Margrete's event API indexes beat changes by bar; its tick coordinates use 1920 per bar.
@@ -813,10 +1013,10 @@ impl Sound2SlideApp<'_> {
             Ok(Some(signature)) => {
                 self.settings.time_signature = signature;
             }
-            Ok(None) => notes.push("拍子イベントは見つかりませんでした".into()),
+            Ok(None) => notes.push(Msg::SignatureEventNotFound),
             Err(message) => notes.push(message),
         }
-        self.bpm_note = notes.join(" / ");
+        self.bpm_note = notes;
     }
 
     fn sync_playback(&mut self) {
@@ -848,9 +1048,9 @@ impl Sound2SlideApp<'_> {
             match Playback::start(audio, self.settings.offset_sec, self.settings.length_sec) {
                 Ok(playback) => {
                     self.playback = Some(playback);
-                    self.playback_error.clear();
+                    self.playback_error = None;
                 }
-                Err(error) => self.playback_error = error,
+                Err(error) => self.playback_error = Some(error),
             }
         }
     }
@@ -870,17 +1070,20 @@ impl Sound2SlideApp<'_> {
             ) {
                 Ok(playback) => {
                     self.playback = Some(playback);
-                    self.playback_error.clear();
+                    self.playback_error = None;
                 }
-                Err(error) => self.playback_error = error,
+                Err(error) => self.playback_error = Some(error),
             }
         }
     }
 
     fn playback_controls(&mut self, ui: &mut egui::Ui) {
+        let lang = self.lang;
         let label = match self.playback.as_ref() {
-            Some(playback) if !playback.is_finished() && !playback.is_paused() => "一時停止",
-            _ => "再生",
+            Some(playback) if !playback.is_finished() && !playback.is_paused() => {
+                lang.pick(["一時停止", "Pause", "暫停", "일시 정지"])
+            }
+            _ => lang.pick(["再生", "Play", "播放", "재생"]),
         };
         if ui
             .add_enabled(self.can_play(), egui::Button::new(label))
@@ -889,7 +1092,10 @@ impl Sound2SlideApp<'_> {
             self.toggle_playback();
         }
         if ui
-            .add_enabled(self.playback.is_some(), egui::Button::new("停止"))
+            .add_enabled(
+                self.playback.is_some(),
+                egui::Button::new(lang.pick(["停止", "Stop", "停止", "정지"])),
+            )
             .clicked()
         {
             self.playback = None;
@@ -899,7 +1105,12 @@ impl Sound2SlideApp<'_> {
             .as_ref()
             .map(|playback| (playback.position_sec() - playback.offset_sec).max(0.0))
             .unwrap_or(0.0);
-        ui.label(format!("{elapsed:.3} 秒"));
+        ui.label(lang.pick([
+            format!("{elapsed:.3} 秒"),
+            format!("{elapsed:.3} s"),
+            format!("{elapsed:.3} 秒"),
+            format!("{elapsed:.3}초"),
+        ]));
         if let Some(playback) = &self.playback {
             let interval_ms = if playback.is_paused() { 100 } else { 16 };
             ui.ctx()
@@ -929,7 +1140,7 @@ impl eframe::App for Sound2SlideApp<'_> {
                     egui::Panel::bottom("open_source_libraries_footer")
                         .resizable(false)
                         .show(ui, |ui| {
-                            if ui.button("オープンソースライブラリ").clicked() {
+                            if ui.button(crate::oss::title(self.lang)).clicked() {
                                 self.show_open_source_libraries = true;
                             }
                         });
@@ -974,6 +1185,7 @@ impl eframe::App for Sound2SlideApp<'_> {
                 self.lane_divisions,
                 self.playback.as_ref().map(Playback::position_sec),
                 &self.silent_zones,
+                self.lang,
             );
             if self.editing_silent_zones {
                 self.silent_zone_controls(ui, &response);
@@ -981,7 +1193,7 @@ impl eframe::App for Sound2SlideApp<'_> {
         });
         self.refresh();
         self.offset_selection_dialog(ui.ctx());
-        crate::oss::show(ui.ctx(), &mut self.show_open_source_libraries);
+        crate::oss::show(ui.ctx(), &mut self.show_open_source_libraries, self.lang);
     }
 
     fn persist_egui_memory(&self) -> bool {
@@ -1011,11 +1223,17 @@ fn consume_playback_shortcut(ctx: &egui::Context) -> bool {
     })
 }
 
-fn lane_division_label(divisions: i32) -> String {
+fn lane_division_label(divisions: i32, lang: Lang) -> String {
     if divisions == 0 {
-        "分割なし".into()
+        lang.pick(["分割なし", "No lanes", "不分割", "분할 없음"])
+            .into()
     } else {
-        format!("{divisions}分割")
+        lang.pick([
+            format!("{divisions}分割"),
+            format!("{divisions} lanes"),
+            format!("{divisions} 等分"),
+            format!("{divisions}분할"),
+        ])
     }
 }
 
@@ -1086,6 +1304,7 @@ fn paint_preview(
     lane_divisions: i32,
     playback_position_sec: Option<f64>,
     silent_zones: &[SilentZone],
+    lang: Lang,
 ) {
     painter.rect_filled(
         rect,
@@ -1097,7 +1316,7 @@ fn paint_preview(
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            "音声ファイルを開いてください",
+            Msg::OpenAudioPrompt.text(lang),
             egui::FontId::proportional(18.0),
             egui::Color32::GRAY,
         );
@@ -1340,37 +1559,74 @@ fn paint_cap(painter: &egui::Painter, center: egui::Pos2, width: f32, height: f3
     painter.rect_filled(rect, radius, egui::Color32::from_rgb(46, 96, 255));
 }
 
-fn install_jp_font(ctx: &egui::Context) {
-    let Some(bytes) = jp_font_bytes() else {
-        return;
-    };
-    let y_offset_factor = line_gap_center_offset(&bytes);
-    let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(
-        "jp".to_owned(),
-        std::sync::Arc::new(egui::FontData::from_owned(bytes).tweak(egui::FontTweak {
-            y_offset_factor,
-            ..Default::default()
-        })),
-    );
-    if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-        family.insert(0, "jp".to_owned());
-    }
-    if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
-        family.insert(0, "jp".to_owned());
-    }
-    ctx.set_fonts(fonts);
+/// CJK system fonts, loaded once so switching languages only reorders the fallback chain.
+#[derive(Default)]
+struct UiFonts {
+    ja: Option<Arc<egui::FontData>>,
+    zh_tw: Option<Arc<egui::FontData>>,
+    ko: Option<Arc<egui::FontData>>,
 }
 
-fn jp_font_bytes() -> Option<Vec<u8>> {
-    [
-        r"C:\Windows\Fonts\YuGothM.ttc",
-        r"C:\Windows\Fonts\yugothm.ttc",
-        r"C:\Windows\Fonts\meiryo.ttc",
-        r"C:\Windows\Fonts\msgothic.ttc",
-    ]
-    .into_iter()
-    .find_map(|path| std::fs::read(path).ok())
+impl UiFonts {
+    fn load() -> Self {
+        Self {
+            ja: load_font(&[
+                r"C:\Windows\Fonts\YuGothM.ttc",
+                r"C:\Windows\Fonts\yugothm.ttc",
+                r"C:\Windows\Fonts\meiryo.ttc",
+                r"C:\Windows\Fonts\msgothic.ttc",
+            ]),
+            zh_tw: load_font(&[
+                r"C:\Windows\Fonts\msjh.ttc",
+                r"C:\Windows\Fonts\mingliu.ttc",
+            ]),
+            ko: load_font(&[
+                r"C:\Windows\Fonts\malgun.ttf",
+                r"C:\Windows\Fonts\gulim.ttc",
+            ]),
+        }
+    }
+
+    fn apply(&self, ctx: &egui::Context, lang: Lang) {
+        let ja = ("ja", &self.ja);
+        let zh_tw = ("zh_tw", &self.zh_tw);
+        let ko = ("ko", &self.ko);
+        // Han characters take the selected language's glyph forms; the other fonts only fill
+        // gaps such as the language names in the selector.
+        let order = match lang {
+            Lang::Ja | Lang::En => [ja, zh_tw, ko],
+            Lang::ZhTw => [zh_tw, ja, ko],
+            Lang::Ko => [ko, ja, zh_tw],
+        };
+        let mut fonts = egui::FontDefinitions::default();
+        let mut position = 0;
+        for (name, data) in order {
+            let Some(data) = data else {
+                continue;
+            };
+            fonts.font_data.insert(name.to_owned(), Arc::clone(data));
+            for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+                if let Some(family) = fonts.families.get_mut(&family) {
+                    family.insert(position, name.to_owned());
+                }
+            }
+            position += 1;
+        }
+        if position > 0 {
+            ctx.set_fonts(fonts);
+        }
+    }
+}
+
+fn load_font(paths: &[&str]) -> Option<Arc<egui::FontData>> {
+    let bytes = paths.iter().find_map(|path| std::fs::read(path).ok())?;
+    let y_offset_factor = line_gap_center_offset(&bytes);
+    Some(Arc::new(egui::FontData::from_owned(bytes).tweak(
+        egui::FontTweak {
+            y_offset_factor,
+            ..Default::default()
+        },
+    )))
 }
 
 fn line_gap_center_offset(font: &[u8]) -> f32 {
@@ -1447,7 +1703,7 @@ mod tests {
         Sound2SlideApp, consume_playback_shortcut, event_walking_back, preview_beats,
         preview_click_position,
     };
-    use crate::{audio::Audio, generate::SilentZone, timing::ChartPosition};
+    use crate::{audio::Audio, generate::SilentZone, i18n::Msg, timing::ChartPosition};
     use eframe::egui;
     use std::sync::{Arc, Mutex};
 
@@ -2152,12 +2408,12 @@ mod tests {
     fn stops_on_lookup_error_without_a_bpm() {
         let error = event_walking_back::<f64>(4, |tick| {
             if tick == 2 {
-                Err("fail".to_string())
+                Err("fail".into())
             } else {
                 Ok(None)
             }
         })
         .unwrap_err();
-        assert_eq!(error, "fail");
+        assert_eq!(error, Msg::from("fail"));
     }
 }
