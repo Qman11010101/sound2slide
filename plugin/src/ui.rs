@@ -1471,8 +1471,20 @@ fn paint_slider(
         painter.add(egui::Shape::mesh(mesh));
     }
     let center_line = egui::Color32::from_rgb(90, 255, 236);
+    // The center line keeps a constant horizontal width, so it gets thinner the more a
+    // segment leans sideways, just like the in-game slide.
+    let half = egui::vec2(1.2, 0.0);
     for pair in placed.windows(2) {
-        painter.line_segment([pair[0].1, pair[1].1], egui::Stroke::new(2.4, center_line));
+        let (mut top, mut bottom) = (pair[0].1, pair[1].1);
+        if top.y > bottom.y {
+            std::mem::swap(&mut top, &mut bottom);
+        }
+        // egui feathers convex polygons correctly only when they wind clockwise.
+        painter.add(egui::Shape::convex_polygon(
+            vec![top - half, top + half, bottom + half, bottom - half],
+            center_line,
+            egui::Stroke::NONE,
+        ));
     }
     let cap_height = ((placed[0].2.x - placed[0].0.x).abs() * 0.14).clamp(5.0, 10.0);
     let last = placed.len() - 1;
