@@ -10,6 +10,7 @@ accepted = [
     "Unicode-3.0",
     "OFL-1.1",
     "Ubuntu-font-1.0",
+    "CDLA-Permissive-2.0",
 ]
 targets = ["x86_64-pc-windows-msvc"]
 ignore-dev-dependencies = true
