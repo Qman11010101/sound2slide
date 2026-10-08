@@ -10,6 +10,7 @@ use crate::{
     modal::ModalHost,
     playback::{Playback, preview_range},
     timing::{ChartPosition, PositionScan},
+    update::{self, Release, UpdateCheck},
 };
 
 const QUANTIZE: &[(i32, &str)] = &[
@@ -64,6 +65,7 @@ pub(crate) fn open(
             creation.egui_ctx.set_visuals(egui::Visuals::dark());
             let mut app = Sound2SlideApp::new(start_tick, app_output, lookup_bpm, lookup_signature);
             app.host = Some(host);
+            app.update_check = UpdateCheck::start();
             app.fonts = UiFonts::load();
             app.fonts.apply(&creation.egui_ctx, app.lang);
             Ok(Box::new(app))
@@ -118,6 +120,8 @@ struct Sound2SlideApp<'a> {
     position_scan: Option<PositionScan>,
     offset_selection: Option<OffsetSelection>,
     show_open_source_libraries: bool,
+    update_check: Option<UpdateCheck>,
+    update_available: Option<Release>,
 }
 
 impl<'a> Sound2SlideApp<'a> {
@@ -156,6 +160,8 @@ impl<'a> Sound2SlideApp<'a> {
             position_scan: None,
             offset_selection: None,
             show_open_source_libraries: false,
+            update_check: None,
+            update_available: None,
         }
     }
 
@@ -1127,7 +1133,13 @@ impl eframe::App for Sound2SlideApp<'_> {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        let toggle_playback = consume_playback_shortcut(ui.ctx());
+        if let Some(check) = &mut self.update_check
+            && let Some(release) = check.poll(ui.ctx())
+        {
+            self.update_available = Some(release);
+        }
+        let toggle_playback =
+            self.update_available.is_none() && consume_playback_shortcut(ui.ctx());
         self.advance_position_scan(ui.ctx());
         self.sync_playback();
         self.refresh();
@@ -1136,16 +1148,19 @@ impl eframe::App for Sound2SlideApp<'_> {
             .min_size(260.0)
             .default_size(300.0)
             .show(ui, |ui| {
-                ui.add_enabled_ui(self.offset_selection.is_none(), |ui| {
-                    egui::Panel::bottom("open_source_libraries_footer")
-                        .resizable(false)
-                        .show(ui, |ui| {
-                            if ui.button(crate::oss::title(self.lang)).clicked() {
-                                self.show_open_source_libraries = true;
-                            }
-                        });
-                    egui::ScrollArea::vertical().show(ui, |ui| self.controls(ui, frame));
-                });
+                ui.add_enabled_ui(
+                    self.offset_selection.is_none() && self.update_available.is_none(),
+                    |ui| {
+                        egui::Panel::bottom("open_source_libraries_footer")
+                            .resizable(false)
+                            .show(ui, |ui| {
+                                if ui.button(crate::oss::title(self.lang)).clicked() {
+                                    self.show_open_source_libraries = true;
+                                }
+                            });
+                        egui::ScrollArea::vertical().show(ui, |ui| self.controls(ui, frame));
+                    },
+                );
             });
         self.refresh();
         self.sync_playback();
@@ -1153,7 +1168,7 @@ impl eframe::App for Sound2SlideApp<'_> {
             self.toggle_playback();
         }
         egui::CentralPanel::default().show(ui, |ui| {
-            if self.offset_selection.is_some() {
+            if self.offset_selection.is_some() || self.update_available.is_some() {
                 ui.disable();
             }
             self.preview_header(ui);
@@ -1194,6 +1209,9 @@ impl eframe::App for Sound2SlideApp<'_> {
         self.refresh();
         self.offset_selection_dialog(ui.ctx());
         crate::oss::show(ui.ctx(), &mut self.show_open_source_libraries, self.lang);
+        if self.offset_selection.is_none() {
+            update::show(ui.ctx(), &mut self.update_available, self.lang);
+        }
     }
 
     fn persist_egui_memory(&self) -> bool {

@@ -7,6 +7,7 @@ mod oss;
 mod playback;
 mod timing;
 mod ui;
+mod update;
 
 use std::{
     error::Error as StdError,

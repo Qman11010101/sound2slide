@@ -17,6 +17,8 @@ marmkmt = { path = "../crates/marmkmt" }
 raw-window-handle = "0.6.2"
 rfd = "0.15"
 rodio = { version = "0.22.2", default-features = false, features = ["playback"] }
+serde = { version = "1", features = ["derive"] }
+ureq = { version = "3", default-features = false, features = ["native-tls-no-default", "json"] }
 symphonia = { version = "0.5.4", features = ["mp3"] }
 
 [target.'cfg(windows)'.dependencies]
