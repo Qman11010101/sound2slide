@@ -35,6 +35,16 @@ const LIBRARIES: &[Library] = &[
         license: "MIT OR Apache-2.0",
     },
     Library {
+        name: "serde",
+        version: "1.0.229",
+        license: "MIT OR Apache-2.0",
+    },
+    Library {
+        name: "ureq",
+        version: "3.4.2",
+        license: "MIT OR Apache-2.0",
+    },
+    Library {
         name: "symphonia",
         version: "0.5.5",
         license: "MPL-2.0",
