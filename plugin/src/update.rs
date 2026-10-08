@@ -14,11 +14,13 @@ const API: &str = "https://api.github.com/repos/Qman11010101/sound2slide";
 const RELEASES_URL: &str = "https://github.com/Qman11010101/sound2slide/releases/latest";
 const BUILD_SHA: &str = env!("SOUND2SLIDE_BUILD_SHA");
 const ARCHIVE: &str = "sound2slide-windows-x64.zip";
+const DOWNLOAD_PREFIX: &str = "https://github.com/Qman11010101/sound2slide/releases/download/";
 
 #[derive(Debug, Deserialize)]
 struct Asset {
     name: String,
     state: String,
+    browser_download_url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -31,16 +33,25 @@ pub(crate) struct Release {
 }
 
 impl Release {
+    fn archive_url(&self) -> Option<&str> {
+        // Only link to this repository's release downloads, never to an arbitrary URL from the API.
+        self.assets
+            .iter()
+            .find(|asset| {
+                asset.name == ARCHIVE
+                    && asset.state == "uploaded"
+                    && asset.browser_download_url.starts_with(DOWNLOAD_PREFIX)
+            })
+            .map(|asset| asset.browser_download_url.as_str())
+    }
+
     fn needs_comparison(&self, current_sha: &str) -> bool {
         !self.draft
             && !self.prerelease
             && valid_sha(current_sha)
             && valid_sha(&self.target_commitish)
             && !self.target_commitish.eq_ignore_ascii_case(current_sha)
-            && self
-                .assets
-                .iter()
-                .any(|asset| asset.name == ARCHIVE && asset.state == "uploaded")
+            && self.archive_url().is_some()
     }
 }
 
@@ -152,10 +163,36 @@ impl Drop for UpdateCheck {
     }
 }
 
-pub(crate) fn show(ctx: &egui::Context, release: &mut Option<Release>, lang: Lang) {
-    let Some(available) = release.as_ref() else {
+pub(crate) fn footer(ui: &mut egui::Ui, available: &Release, lang: Lang) {
+    let Some(url) = available.archive_url() else {
         return;
     };
+    ui.label(format!(
+        "{} (sound2slide {})",
+        lang.pick([
+            "新しいバージョンがあります",
+            "A new version is available",
+            "有新版本可供下載",
+            "새 버전이 있습니다",
+        ]),
+        available.tag_name
+    ));
+    ui.hyperlink_to(
+        lang.pick([
+            "ZIPをダウンロード",
+            "Download ZIP",
+            "下載 ZIP",
+            "ZIP 다운로드",
+        ]),
+        url,
+    );
+    ui.separator();
+}
+
+pub(crate) fn show(ctx: &egui::Context, available: &Release, open: &mut bool, lang: Lang) {
+    if !*open {
+        return;
+    }
     let mut close = false;
     let response = egui::Modal::new(egui::Id::new("update_available")).show(ctx, |ui| {
         ui.set_max_width((ctx.content_rect().width() - 64.0).clamp(200.0, 420.0));
@@ -202,7 +239,7 @@ pub(crate) fn show(ctx: &egui::Context, release: &mut Option<Release>, lang: Lan
         });
     });
     if close || response.should_close() {
-        *release = None;
+        *open = false;
     }
 }
 
@@ -222,6 +259,7 @@ mod tests {
             assets: vec![Asset {
                 name: ARCHIVE.into(),
                 state: "uploaded".into(),
+                browser_download_url: format!("{DOWNLOAD_PREFIX}2026-10-08-2/{ARCHIVE}"),
             }],
         }
     }
@@ -255,6 +293,20 @@ mod tests {
         candidate.assets[0].name = "source.zip".into();
         assert!(!candidate.needs_comparison(CURRENT));
         candidate.assets.clear();
+        assert!(!candidate.needs_comparison(CURRENT));
+    }
+
+    #[test]
+    fn archive_link_points_only_to_this_repository_downloads() {
+        let mut candidate = release();
+        assert_eq!(
+            candidate.archive_url(),
+            Some(
+                "https://github.com/Qman11010101/sound2slide/releases/download/2026-10-08-2/sound2slide-windows-x64.zip"
+            )
+        );
+        candidate.assets[0].browser_download_url = format!("https://example.com/{ARCHIVE}");
+        assert!(candidate.archive_url().is_none());
         assert!(!candidate.needs_comparison(CURRENT));
     }
 
@@ -319,11 +371,12 @@ mod tests {
     fn escape_dismisses_the_notification_in_every_language() {
         for lang in Lang::ALL {
             let ctx = egui::Context::default();
-            let mut available = Some(release());
+            let available = release();
+            let mut open = true;
             ctx.begin_pass(egui::RawInput::default());
-            show(&ctx, &mut available, lang);
+            show(&ctx, &available, &mut open, lang);
             let _ = ctx.end_pass();
-            assert!(available.is_some());
+            assert!(open);
             ctx.begin_pass(egui::RawInput {
                 events: vec![egui::Event::Key {
                     key: egui::Key::Escape,
@@ -334,9 +387,9 @@ mod tests {
                 }],
                 ..Default::default()
             });
-            show(&ctx, &mut available, lang);
+            show(&ctx, &available, &mut open, lang);
             let output = ctx.end_pass();
-            assert!(available.is_none(), "{lang:?}");
+            assert!(!open, "{lang:?}");
             assert!(output.platform_output.commands.is_empty());
         }
     }

@@ -122,6 +122,7 @@ struct Sound2SlideApp<'a> {
     show_open_source_libraries: bool,
     update_check: Option<UpdateCheck>,
     update_available: Option<Release>,
+    update_dialog_open: bool,
 }
 
 impl<'a> Sound2SlideApp<'a> {
@@ -162,6 +163,7 @@ impl<'a> Sound2SlideApp<'a> {
             show_open_source_libraries: false,
             update_check: None,
             update_available: None,
+            update_dialog_open: false,
         }
     }
 
@@ -1137,9 +1139,9 @@ impl eframe::App for Sound2SlideApp<'_> {
             && let Some(release) = check.poll(ui.ctx())
         {
             self.update_available = Some(release);
+            self.update_dialog_open = true;
         }
-        let toggle_playback =
-            self.update_available.is_none() && consume_playback_shortcut(ui.ctx());
+        let toggle_playback = !self.update_dialog_open && consume_playback_shortcut(ui.ctx());
         self.advance_position_scan(ui.ctx());
         self.sync_playback();
         self.refresh();
@@ -1149,11 +1151,14 @@ impl eframe::App for Sound2SlideApp<'_> {
             .default_size(300.0)
             .show(ui, |ui| {
                 ui.add_enabled_ui(
-                    self.offset_selection.is_none() && self.update_available.is_none(),
+                    self.offset_selection.is_none() && !self.update_dialog_open,
                     |ui| {
                         egui::Panel::bottom("open_source_libraries_footer")
                             .resizable(false)
                             .show(ui, |ui| {
+                                if let Some(available) = &self.update_available {
+                                    update::footer(ui, available, self.lang);
+                                }
                                 if ui.button(crate::oss::title(self.lang)).clicked() {
                                     self.show_open_source_libraries = true;
                                 }
@@ -1168,7 +1173,7 @@ impl eframe::App for Sound2SlideApp<'_> {
             self.toggle_playback();
         }
         egui::CentralPanel::default().show(ui, |ui| {
-            if self.offset_selection.is_some() || self.update_available.is_some() {
+            if self.offset_selection.is_some() || self.update_dialog_open {
                 ui.disable();
             }
             self.preview_header(ui);
@@ -1209,8 +1214,10 @@ impl eframe::App for Sound2SlideApp<'_> {
         self.refresh();
         self.offset_selection_dialog(ui.ctx());
         crate::oss::show(ui.ctx(), &mut self.show_open_source_libraries, self.lang);
-        if self.offset_selection.is_none() {
-            update::show(ui.ctx(), &mut self.update_available, self.lang);
+        if self.offset_selection.is_none()
+            && let Some(available) = &self.update_available
+        {
+            update::show(ui.ctx(), available, &mut self.update_dialog_open, self.lang);
         }
     }
 
