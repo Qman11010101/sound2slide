@@ -163,6 +163,24 @@ impl Drop for UpdateCheck {
     }
 }
 
+/// eframe is built without egui-winit's `links` feature, so `Context::open_url` is a no-op.
+fn open_in_browser(url: &str) {
+    use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+
+    let url: Vec<u16> = url.encode_utf16().chain(Some(0)).collect();
+    // SAFETY: the verb and URL are NUL-terminated UTF-16 strings that outlive the call.
+    unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            windows_sys::w!("open"),
+            url.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        );
+    }
+}
+
 pub(crate) fn footer(ui: &mut egui::Ui, available: &Release, lang: Lang) {
     let Some(url) = available.archive_url() else {
         return;
@@ -177,15 +195,13 @@ pub(crate) fn footer(ui: &mut egui::Ui, available: &Release, lang: Lang) {
         ]),
         available.tag_name
     ));
-    ui.hyperlink_to(
-        lang.pick([
-            "ZIPをダウンロード",
-            "Download ZIP",
-            "下載 ZIP",
-            "ZIP 다운로드",
-        ]),
-        url,
-    );
+    if ui
+        .link(lang.pick(["ダウンロード", "Download", "下載", "다운로드"]))
+        .on_hover_text(url)
+        .clicked()
+    {
+        open_in_browser(url);
+    }
     ui.separator();
 }
 
@@ -227,7 +243,7 @@ pub(crate) fn show(ctx: &egui::Context, available: &Release, open: &mut bool, la
                 ]))
                 .clicked()
             {
-                ctx.open_url(egui::OpenUrl::new_tab(RELEASES_URL));
+                open_in_browser(RELEASES_URL);
                 close = true;
             }
             if ui
@@ -317,6 +333,22 @@ mod tests {
         candidate.target_commitish = "main".into();
         assert!(!candidate.needs_comparison(CURRENT));
         assert!(!valid_sha("../../main"));
+    }
+
+    #[test]
+    fn https_request_uses_an_enabled_tls_provider() {
+        // ureq panics instead of erroring when the selected TLS provider is not compiled in.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || drop(listener.accept()));
+        let result = std::panic::catch_unwind(|| {
+            get_json::<Comparison>(&format!("https://127.0.0.1:{port}/")).is_err()
+        });
+        server.join().unwrap();
+        assert!(
+            result.unwrap(),
+            "a closed TLS handshake must fail without panicking"
+        );
     }
 
     #[test]
