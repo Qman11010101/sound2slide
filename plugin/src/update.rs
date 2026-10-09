@@ -407,7 +407,7 @@ mod tests {
             let mut open = true;
             ctx.begin_pass(egui::RawInput::default());
             show(&ctx, &available, &mut open, lang);
-            let _ = ctx.end_pass();
+            ctx.end_pass().textures_delta.clear();
             assert!(open);
             ctx.begin_pass(egui::RawInput {
                 events: vec![egui::Event::Key {
@@ -420,7 +420,8 @@ mod tests {
                 ..Default::default()
             });
             show(&ctx, &available, &mut open, lang);
-            let output = ctx.end_pass();
+            let mut output = ctx.end_pass();
+            output.textures_delta.clear();
             assert!(!open, "{lang:?}");
             assert!(output.platform_output.commands.is_empty());
         }

@@ -50,6 +50,8 @@ pub(crate) fn open(
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("sound2slide")
+            // eframe targets the active HWND, which can still belong to Margrete.
+            .with_icon(egui::IconData::default())
             .with_inner_size([640.0, 780.0])
             .with_min_inner_size([560.0, 480.0]),
         centered: true,
