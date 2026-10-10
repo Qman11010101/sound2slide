@@ -33,6 +33,8 @@ pub(crate) struct Settings {
     pub symmetric_width: bool,
     pub center_ends: bool,
     pub zigzag: bool,
+    /// Alternates widths 1 and 2 so the note center, where a rainbone line runs, moves in half lanes.
+    pub fine_center: bool,
 }
 
 impl Default for Settings {
@@ -51,6 +53,7 @@ impl Default for Settings {
             symmetric_width: false,
             center_ends: true,
             zigzag: false,
+            fine_center: false,
         }
     }
 }
@@ -106,6 +109,33 @@ pub(crate) fn symmetric_width_from_amplitude(magnitude: f32, max_width: i32) -> 
     let width = (magnitude.clamp(0.0, 1.0) * max_width as f32).round() as i32;
     let width = width.clamp(2, max_width);
     (centered_x(width), width)
+}
+
+/// Center of the lane span in half lanes.
+const MIDDLE_HALF_LANE: i32 = LANE_COUNT;
+
+/// Converts a center in half lanes to a width 1 note (odd) or a width 2 note (even).
+fn note_from_half_lane(center: i32) -> (i32, i32) {
+    let center = center.clamp(1, 2 * LANE_COUNT - 1);
+    if center % 2 == 1 {
+        ((center - 1) / 2, 1)
+    } else {
+        (center / 2 - 1, 2)
+    }
+}
+
+fn half_lane_center(x: i32, width: i32) -> i32 {
+    2 * x + width
+}
+
+/// Farthest the center may move from the middle, in half lanes.
+fn half_lane_reach(max_width: i32) -> i32 {
+    max_width.clamp(2, LANE_COUNT) - 1
+}
+
+pub(crate) fn amplitude_to_fine_note(signed: f32, max_width: i32) -> (i32, i32) {
+    let reach = half_lane_reach(max_width) as f32;
+    note_from_half_lane(MIDDLE_HALF_LANE + (signed.clamp(-1.0, 1.0) * reach).round() as i32)
 }
 
 pub(crate) fn amplitude_to_x(signed: f32, width: i32, max_width: i32) -> i32 {
@@ -250,6 +280,7 @@ fn flush(segment: &mut Vec<RawPoint>, slides: &mut Vec<Slide>, settings: &Settin
     smooth_values(&mut values, settings.smooth);
     stretch_full(&mut values);
     let fixed_width = width.clamp(1, LANE_COUNT);
+    let fine = settings.fine_center && !settings.symmetric_width;
     let mut points: Vec<SlidePoint> = segment
         .iter()
         .zip(values)
@@ -273,6 +304,14 @@ fn flush(segment: &mut Vec<RawPoint>, slides: &mut Vec<Slide>, settings: &Settin
                     width: point_width,
                     control: false,
                 }
+            } else if fine {
+                let (x, width) = amplitude_to_fine_note(signed, settings.max_width);
+                SlidePoint {
+                    tick: point.tick,
+                    x,
+                    width,
+                    control: false,
+                }
             } else {
                 SlidePoint {
                     tick: point.tick,
@@ -287,11 +326,19 @@ fn flush(segment: &mut Vec<RawPoint>, slides: &mut Vec<Slide>, settings: &Settin
     if settings.center_ends && !settings.symmetric_width && !points.is_empty() {
         let last = points.len() - 1;
         for index in [0, last] {
-            points[index].x = centered_x(points[index].width);
+            if fine {
+                (points[index].x, points[index].width) = note_from_half_lane(MIDDLE_HALF_LANE);
+            } else {
+                points[index].x = centered_x(points[index].width);
+            }
         }
     }
     if settings.zigzag && !settings.symmetric_width {
-        points = insert_opposite_controls(points, settings.max_width);
+        points = if fine {
+            insert_opposite_fine_controls(points, settings.max_width)
+        } else {
+            insert_opposite_controls(points, settings.max_width)
+        };
         if settings.remove_silent_points {
             // Mirrored controls can land inside a silent gap even when its sampled points are omitted.
             points.retain(|point| {
@@ -341,6 +388,37 @@ fn insert_opposite_controls(points: Vec<SlidePoint>, max_width: i32) -> Vec<Slid
             tick: current.tick + gap / 2,
             x,
             width: current.width,
+            control: true,
+        });
+    }
+    output.push(*points.last().expect("point"));
+    output
+}
+
+fn insert_opposite_fine_controls(points: Vec<SlidePoint>, max_width: i32) -> Vec<SlidePoint> {
+    if points.len() < 2 {
+        return points;
+    }
+    let reach = half_lane_reach(max_width);
+    let mut output = Vec::with_capacity(points.len() * 2);
+    for pair in points.windows(2) {
+        let current = pair[0];
+        let next = pair[1];
+        output.push(current);
+        let side = |point: SlidePoint| {
+            (half_lane_center(point.x, point.width) - MIDDLE_HALF_LANE).signum()
+        };
+        let gap = next.tick.saturating_sub(current.tick);
+        if side(current) == 0 || side(current) != side(next) || gap < 2 {
+            continue;
+        }
+        let mirrored = 2 * MIDDLE_HALF_LANE - half_lane_center(current.x, current.width);
+        let (x, width) =
+            note_from_half_lane(mirrored.clamp(MIDDLE_HALF_LANE - reach, MIDDLE_HALF_LANE + reach));
+        output.push(SlidePoint {
+            tick: current.tick + gap / 2,
+            x,
+            width,
             control: true,
         });
     }
@@ -449,7 +527,68 @@ mod tests {
             symmetric_width: false,
             center_ends: false,
             zigzag: false,
+            fine_center: false,
         }
+    }
+
+    #[test]
+    fn fine_center_alternates_widths_one_and_two_in_half_lanes() {
+        assert_eq!(note_from_half_lane(1), (0, 1));
+        assert_eq!(note_from_half_lane(2), (0, 2));
+        assert_eq!(note_from_half_lane(16), (7, 2));
+        assert_eq!(note_from_half_lane(17), (8, 1));
+        assert_eq!(note_from_half_lane(31), (15, 1));
+        assert_eq!(amplitude_to_fine_note(-1.0, 16), (0, 1));
+        assert_eq!(amplitude_to_fine_note(0.0, 16), (7, 2));
+        assert_eq!(amplitude_to_fine_note(1.0, 16), (15, 1));
+        assert_eq!(amplitude_to_fine_note(-1.0, 2), (7, 1));
+        assert_eq!(amplitude_to_fine_note(1.0, 2), (8, 1));
+        let centers: std::collections::BTreeSet<_> = (-150..=150)
+            .map(|value| {
+                let (x, width) = amplitude_to_fine_note(value as f32 / 150.0, 16);
+                half_lane_center(x, width)
+            })
+            .collect();
+        assert_eq!(centers, (1..=31).collect());
+    }
+
+    #[test]
+    fn fine_center_keeps_ends_and_mirrored_controls_on_half_lanes() {
+        let mut options = settings(2.0);
+        options.fine_center = true;
+        options.center_ends = true;
+        options.zigzag = true;
+        options.silence_threshold = 0.0;
+        let samples: Vec<f32> = (0..2000)
+            .map(|index| ((index / 250) as f32 * 0.3).sin() * 0.3 + 0.5)
+            .collect();
+        options.quantize_ticks = 120;
+        let points = &generate(&samples, 1000, 0, &options).slides[0].points;
+        assert!(points.iter().all(|point| matches!(point.width, 1 | 2)));
+        assert_eq!((points[0].x, points[0].width), (7, 2));
+        let last = points.last().unwrap();
+        assert_eq!((last.x, last.width), (7, 2));
+        assert!(points.iter().any(|point| point.width == 1));
+        let controls = insert_opposite_fine_controls(
+            vec![
+                SlidePoint {
+                    tick: 0,
+                    x: 2,
+                    width: 1,
+                    control: false,
+                },
+                SlidePoint {
+                    tick: 8,
+                    x: 3,
+                    width: 2,
+                    control: false,
+                },
+            ],
+            16,
+        );
+        assert_eq!(controls.len(), 3);
+        assert_eq!(half_lane_center(controls[1].x, controls[1].width), 27);
+        assert!(controls[1].control);
     }
 
     #[test]

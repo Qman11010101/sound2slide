@@ -5,6 +5,7 @@ mod mgxc;
 mod modal;
 mod oss;
 mod playback;
+mod rainbone;
 mod timing;
 mod ui;
 mod update;
@@ -19,7 +20,7 @@ use marmkmt::{
     Command, Context, Error, LongAttribute, NoteInfo, NoteType, Plugin, PluginInfo, Result,
 };
 
-use crate::{generate::SlidePoint, i18n::Msg, ui::Commit};
+use crate::{generate::SlidePoint, i18n::Msg, rainbone::Output, ui::Commit};
 
 struct Sound2SlidePlugin;
 struct Sound2SlideCommand;
@@ -120,7 +121,7 @@ fn write_slides(context: &mut Context<'_>, commit: &Commit) -> Result<()> {
             if slide.points.len() < 2 {
                 continue;
             }
-            write_one(chart, slide, commit.transparent_steps)?;
+            write_one(chart, slide, commit.transparent_steps, commit.output)?;
         }
         Ok(())
     })
@@ -130,6 +131,7 @@ fn write_one<'a>(
     chart: &marmkmt::Chart<'a>,
     slide: &generate::Slide,
     transparent_steps: bool,
+    output: Output,
 ) -> Result<()> {
     let head = chart.create_note()?;
     let mut children = Vec::new();
@@ -139,12 +141,12 @@ fn write_one<'a>(
             LongAttribute::BEGIN
         } else if index == last {
             LongAttribute::END
-        } else if point.control || transparent_steps {
+        } else if point.control || (transparent_steps && output == Output::Slide) {
             LongAttribute::CONTROL
         } else {
             LongAttribute::STEP
         };
-        let info = note_info(point, attribute);
+        let info = note_info(point, attribute, output);
         if index == 0 {
             head.set_info(&info)?;
         } else {
@@ -159,14 +161,60 @@ fn write_one<'a>(
     Ok(())
 }
 
-fn note_info(point: &SlidePoint, attribute: LongAttribute) -> NoteInfo {
-    NoteInfo {
+fn note_info(point: &SlidePoint, attribute: LongAttribute, output: Output) -> NoteInfo {
+    let base = NoteInfo {
         note_type: NoteType::SLIDE,
         long_attribute: attribute,
         x: point.x,
         width: point.width,
         tick: point.tick,
         ..NoteInfo::default()
+    };
+    match output {
+        Output::Slide => base,
+        Output::Rainbone { color, height } => {
+            let head = attribute == LongAttribute::BEGIN;
+            // Margrete keeps the line color and the no-notes mode on the head note only.
+            NoteInfo {
+                note_type: NoteType::AIR_CRUSH,
+                variation_id: if head { color } else { 0 },
+                height,
+                option_value: rainbone::LINE_ONLY,
+                ..base
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rainbone_matches_a_line_saved_by_margrete() {
+        let output = Output::Rainbone {
+            color: 3,
+            height: 80,
+        };
+        let point = |tick, x| SlidePoint {
+            tick,
+            x,
+            width: 4,
+            control: false,
+        };
+        let head = note_info(&point(0, 12), LongAttribute::BEGIN, output);
+        assert_eq!(
+            (head.note_type, head.variation_id, head.x, head.width),
+            (NoteType::AIR_CRUSH, 3, 12, 4)
+        );
+        assert_eq!((head.height, head.tick, head.option_value), (80, 0, 0));
+        let end = note_info(&point(3360, 4), LongAttribute::END, output);
+        assert_eq!(
+            (end.note_type, end.variation_id, end.x, end.height, end.tick),
+            (NoteType::AIR_CRUSH, 0, 4, 80, 3360)
+        );
+        let slide = note_info(&point(0, 12), LongAttribute::BEGIN, Output::Slide);
+        assert_eq!((slide.note_type, slide.height), (NoteType::SLIDE, 0));
     }
 }
 
