@@ -110,6 +110,7 @@ struct Sound2SlideApp<'a> {
     rainbone: bool,
     rainbone_color: i32,
     rainbone_height: i32,
+    rainbone_fine: bool,
     lane_divisions: i32,
     generated: Generated,
     silent_zones: Vec<SilentZone>,
@@ -154,6 +155,7 @@ impl<'a> Sound2SlideApp<'a> {
             rainbone: false,
             rainbone_color: 0,
             rainbone_height: rainbone::DEFAULT_HEIGHT,
+            rainbone_fine: false,
             lane_divisions: 16,
             generated: Generated::default(),
             silent_zones: Vec::new(),
@@ -179,8 +181,9 @@ impl<'a> Sound2SlideApp<'a> {
 
     fn refresh(&mut self) {
         self.sync_silent_zones();
+        let settings = self.generation_settings();
         if self.cached_generation == self.generation
-            && self.cached_settings == self.settings
+            && self.cached_settings == settings
             && self.cached_silent_zones == self.silent_zones
         {
             return;
@@ -190,13 +193,13 @@ impl<'a> Sound2SlideApp<'a> {
                 &audio.samples,
                 audio.sample_rate,
                 self.start_tick,
-                &self.settings,
+                &settings,
                 &self.silent_zones,
             ),
             None => Generated::default(),
         };
         self.cached_generation = self.generation;
-        self.cached_settings = self.settings;
+        self.cached_settings = settings;
         self.cached_silent_zones.clone_from(&self.silent_zones);
     }
 
@@ -540,13 +543,19 @@ impl<'a> Sound2SlideApp<'a> {
         });
         ui.separator();
         self.output_controls(ui);
-        ui.label(lang.pick([
-            "スライドの種類",
-            "Slide type",
-            "Slide 類型",
-            "슬라이드 종류",
-        ]));
+        let fine_rainbone = self.fine_rainbone();
+        if !fine_rainbone {
+            ui.label(lang.pick([
+                "スライドの種類",
+                "Slide type",
+                "Slide 類型",
+                "슬라이드 종류",
+            ]));
+        }
         ui.horizontal(|ui| {
+            if fine_rainbone {
+                return;
+            }
             ui.radio_value(
                 &mut self.settings.symmetric_width,
                 false,
@@ -558,11 +567,14 @@ impl<'a> Sound2SlideApp<'a> {
                 lang.pick(["左右対称", "Symmetric", "左右對稱", "좌우 대칭"]),
             );
         });
-        if !self.settings.symmetric_width {
-            ui.add(
-                egui::Slider::new(&mut self.settings.width, 1..=16)
-                    .text(lang.pick(["幅", "Width", "寬度", "폭"])),
-            );
+        // Fine reproduction picks widths 1 and 2 itself, replacing the slide type and the width.
+        if fine_rainbone || !self.settings.symmetric_width {
+            if !fine_rainbone {
+                ui.add(
+                    egui::Slider::new(&mut self.settings.width, 1..=16)
+                        .text(lang.pick(["幅", "Width", "寬度", "폭"])),
+                );
+            }
             ui.checkbox(
                 &mut self.settings.zigzag,
                 lang.pick([
@@ -709,6 +721,20 @@ impl Sound2SlideApp<'_> {
         }
     }
 
+    fn fine_rainbone(&self) -> bool {
+        self.rainbone && self.rainbone_fine
+    }
+
+    /// Settings used for generation, with the rainbone's fine reproduction applied.
+    fn generation_settings(&self) -> Settings {
+        let mut settings = self.settings;
+        if self.fine_rainbone() {
+            settings.fine_center = true;
+            settings.symmetric_width = false;
+        }
+        settings
+    }
+
     fn output_controls(&mut self, ui: &mut egui::Ui) {
         let lang = self.lang;
         ui.horizontal(|ui| {
@@ -748,6 +774,21 @@ impl Sound2SlideApp<'_> {
                     }
                 });
         });
+        ui.checkbox(
+            &mut self.rainbone_fine,
+            lang.pick([
+                "さらに細かく波形を再現する",
+                "Reproduce the waveform more finely",
+                "更細緻地重現波形",
+                "파형을 더 세밀하게 재현",
+            ]),
+        )
+        .on_hover_text(lang.pick([
+            "線はノートの中央に引かれます。1幅と2幅を使い分けて、線をレーンの中央と境目の両方に乗せます。",
+            "The line runs through the center of each note. Mixing widths 1 and 2 puts it both on lane centers and on lane borders.",
+            "線會畫在音符的中央。交替使用 1 寬與 2 寬，讓線同時落在軌道中央與軌道交界。",
+            "선은 노트의 가운데를 지납니다. 1폭과 2폭을 섞어 선을 레인 가운데와 경계 양쪽에 올립니다.",
+        ]));
         ui.horizontal(|ui| {
             ui.label(lang.pick(["高さ", "Height", "高度", "높이"]));
             ui.add(
@@ -1653,11 +1694,24 @@ fn paint_rainbone(
         })
         .collect();
     // A transparent line is invisible in game, so show it faintly to keep it editable.
-    let stroke = match color.rgb {
-        Some([r, g, b]) => egui::Stroke::new(3.0, egui::Color32::from_rgb(r, g, b)),
-        None => egui::Stroke::new(1.0, egui::Color32::from_white_alpha(80)),
+    let (fill, half) = match color.rgb {
+        Some([r, g, b]) => (egui::Color32::from_rgb(r, g, b), egui::vec2(1.5, 0.0)),
+        None => (egui::Color32::from_white_alpha(80), egui::vec2(0.6, 0.0)),
     };
-    painter.add(egui::Shape::line(points, stroke));
+    // Like the slide's center line, the width stays constant horizontally, so the line
+    // gets thinner the more a segment leans sideways.
+    for pair in points.windows(2) {
+        let (mut top, mut bottom) = (pair[0], pair[1]);
+        if top.y > bottom.y {
+            std::mem::swap(&mut top, &mut bottom);
+        }
+        // egui feathers convex polygons correctly only when they wind clockwise.
+        painter.add(egui::Shape::convex_polygon(
+            vec![top - half, top + half, bottom + half, bottom - half],
+            fill,
+            egui::Stroke::NONE,
+        ));
+    }
 }
 
 fn add_gradient_quad(
@@ -1872,6 +1926,31 @@ mod tests {
     use crate::{audio::Audio, generate::SilentZone, i18n::Msg, timing::ChartPosition};
     use eframe::egui;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn fine_reproduction_applies_only_to_rainbones() {
+        let mut app = zone_test_app();
+        app.editing_silent_zones = false;
+        app.settings.symmetric_width = true;
+        app.settings.width = 6;
+        app.rainbone_fine = true;
+        assert_eq!(app.generation_settings(), app.settings);
+        app.rainbone = true;
+        app.refresh();
+        let settings = app.generation_settings();
+        assert!(settings.fine_center && !settings.symmetric_width);
+        assert!(
+            app.generated
+                .slides
+                .iter()
+                .flat_map(|slide| &slide.points)
+                .all(|point| matches!(point.width, 1 | 2))
+        );
+        assert_eq!(
+            (app.settings.width, app.settings.symmetric_width),
+            (6, true)
+        );
+    }
 
     fn zone_test_app() -> Sound2SlideApp<'static> {
         let mut app =
