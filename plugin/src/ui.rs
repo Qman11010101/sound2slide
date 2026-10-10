@@ -9,6 +9,7 @@ use crate::{
     mgxc,
     modal::ModalHost,
     playback::{Playback, preview_range},
+    rainbone::{self, Output},
     timing::{ChartPosition, PositionScan},
     update::{self, Release, UpdateCheck},
 };
@@ -37,6 +38,7 @@ const QUANTIZE: &[(i32, &str)] = &[
 pub(crate) struct Commit {
     pub slides: Vec<Slide>,
     pub transparent_steps: bool,
+    pub output: Output,
 }
 
 pub(crate) fn open(
@@ -105,6 +107,9 @@ struct Sound2SlideApp<'a> {
     settings: Settings,
     bpm_note: Vec<Msg>,
     transparent_steps: bool,
+    rainbone: bool,
+    rainbone_color: i32,
+    rainbone_height: i32,
     lane_divisions: i32,
     generated: Generated,
     silent_zones: Vec<SilentZone>,
@@ -146,6 +151,9 @@ impl<'a> Sound2SlideApp<'a> {
             settings,
             bpm_note: Vec::new(),
             transparent_steps: true,
+            rainbone: false,
+            rainbone_color: 0,
+            rainbone_height: rainbone::DEFAULT_HEIGHT,
             lane_divisions: 16,
             generated: Generated::default(),
             silent_zones: Vec::new(),
@@ -531,6 +539,7 @@ impl<'a> Sound2SlideApp<'a> {
             }
         });
         ui.separator();
+        self.output_controls(ui);
         ui.label(lang.pick([
             "スライドの種類",
             "Slide type",
@@ -615,22 +624,24 @@ impl<'a> Sound2SlideApp<'a> {
             self.settings.max_width = self.settings.width;
             ui.ctx().request_repaint();
         }
-        ui.checkbox(
-            &mut self.transparent_steps,
-            lang.pick([
-                "中継点を透明にする（節を置かない）",
-                "Make step points invisible (no joints)",
-                "中繼點設為透明（不放置節點）",
-                "중계점을 투명하게 (마디를 두지 않음)",
-            ]),
-        );
+        if !self.rainbone {
+            ui.checkbox(
+                &mut self.transparent_steps,
+                lang.pick([
+                    "中継点を透明にする（節を置かない）",
+                    "Make step points invisible (no joints)",
+                    "中繼點設為透明（不放置節點）",
+                    "중계점을 투명하게 (마디를 두지 않음)",
+                ]),
+            );
+        }
         ui.separator();
         let notes: usize = self
             .generated
             .slides
             .iter()
             .map(|slide| {
-                if self.transparent_steps {
+                if self.transparent_steps && !self.rainbone {
                     let start = slide.points.first().map(|point| point.tick).unwrap_or(0);
                     let end = slide.points.last().map(|point| point.tick).unwrap_or(start);
                     generate::transparent_slide_note_count(start, end)
@@ -669,6 +680,7 @@ impl<'a> Sound2SlideApp<'a> {
             let commit = Commit {
                 slides: self.generated.slides.clone(),
                 transparent_steps: self.transparent_steps,
+                output: self.output(),
             };
             *self
                 .output
@@ -682,6 +694,76 @@ impl<'a> Sound2SlideApp<'a> {
         {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
+    }
+}
+
+impl Sound2SlideApp<'_> {
+    fn output(&self) -> Output {
+        if self.rainbone {
+            Output::Rainbone {
+                color: self.rainbone_color,
+                height: self.rainbone_height,
+            }
+        } else {
+            Output::Slide
+        }
+    }
+
+    fn output_controls(&mut self, ui: &mut egui::Ui) {
+        let lang = self.lang;
+        ui.horizontal(|ui| {
+            ui.label(lang.pick(["出力", "Output", "輸出", "출력"]));
+            ui.radio_value(
+                &mut self.rainbone,
+                false,
+                lang.pick(["スライド", "Slide", "Slide", "슬라이드"]),
+            );
+            ui.radio_value(
+                &mut self.rainbone,
+                true,
+                lang.pick(["レインボーン", "Rainbone", "Rainbone", "레인본"]),
+            )
+            .on_hover_text(lang.pick([
+                "AIR-CRUSH のノーツを置かず、空中の線だけを追加します。",
+                "Adds only the air line of an AIR-CRUSH, without crush notes.",
+                "不放置 AIR-CRUSH 音符，只加入空中的線。",
+                "AIR-CRUSH 노트 없이 공중의 선만 추가합니다.",
+            ]));
+        });
+        if !self.rainbone {
+            return;
+        }
+        ui.horizontal(|ui| {
+            ui.label(lang.pick(["線の色", "Line color", "線的顏色", "선 색"]));
+            let selected = rainbone::color(self.rainbone_color);
+            egui::ComboBox::from_id_salt("rainbone_color")
+                .selected_text(line_color_text(selected, lang))
+                .show_ui(ui, |ui| {
+                    for color in rainbone::COLORS {
+                        ui.selectable_value(
+                            &mut self.rainbone_color,
+                            color.id,
+                            line_color_text(color, lang),
+                        );
+                    }
+                });
+        });
+        ui.horizontal(|ui| {
+            ui.label(lang.pick(["高さ", "Height", "高度", "높이"]));
+            ui.add(
+                egui::DragValue::new(&mut self.rainbone_height)
+                    .range(0..=rainbone::MAX_HEIGHT)
+                    .speed(1.0),
+            );
+        });
+    }
+}
+
+fn line_color_text(color: &rainbone::LineColor, lang: Lang) -> egui::RichText {
+    let text = format!("({}) {}", color.key, lang.pick(color.names));
+    match color.rgb {
+        Some([r, g, b]) => egui::RichText::new(text).color(egui::Color32::from_rgb(r, g, b)),
+        None => egui::RichText::new(text),
     }
 }
 
@@ -1202,6 +1284,7 @@ impl eframe::App for Sound2SlideApp<'_> {
                 self.audio.as_ref(),
                 &self.settings,
                 &self.generated.slides,
+                self.output(),
                 self.start_tick,
                 self.settings.time_signature,
                 self.lane_divisions,
@@ -1326,6 +1409,7 @@ fn paint_preview(
     audio: Option<&Audio>,
     settings: &Settings,
     slides: &[Slide],
+    output: Output,
     start_tick: i32,
     time_signature: [i32; 2],
     lane_divisions: i32,
@@ -1416,6 +1500,19 @@ fn paint_preview(
     }
     let ticks_per_second = ticks_per_second(settings.bpm.max(1.0), settings.time_signature);
     for slide in slides {
+        if let Output::Rainbone { color, .. } = output {
+            paint_rainbone(
+                painter,
+                slide,
+                rainbone::color(color),
+                start_tick,
+                settings.offset_sec,
+                ticks_per_second,
+                &lane_x,
+                &time_y,
+            );
+            continue;
+        }
         paint_slider(
             painter,
             slide,
@@ -1531,6 +1628,36 @@ fn paint_slider(
         placed[last].2.x - placed[last].0.x,
         cap_height,
     );
+}
+
+fn paint_rainbone(
+    painter: &egui::Painter,
+    slide: &Slide,
+    color: &rainbone::LineColor,
+    start_tick: i32,
+    offset_sec: f64,
+    ticks_per_second: f64,
+    lane_x: &impl Fn(f32) -> f32,
+    time_y: &impl Fn(f64) -> f32,
+) {
+    let points: Vec<egui::Pos2> = slide
+        .points
+        .iter()
+        .map(|point| {
+            let time =
+                offset_sec + f64::from(point.tick.saturating_sub(start_tick)) / ticks_per_second;
+            egui::pos2(
+                lane_x(point.x as f32 + point.width as f32 * 0.5),
+                time_y(time),
+            )
+        })
+        .collect();
+    // A transparent line is invisible in game, so show it faintly to keep it editable.
+    let stroke = match color.rgb {
+        Some([r, g, b]) => egui::Stroke::new(3.0, egui::Color32::from_rgb(r, g, b)),
+        None => egui::Stroke::new(1.0, egui::Color32::from_white_alpha(80)),
+    };
+    painter.add(egui::Shape::line(points, stroke));
 }
 
 fn add_gradient_quad(
