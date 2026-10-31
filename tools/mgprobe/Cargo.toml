@@ -1,0 +1,15 @@
+[package]
+name = "mgprobe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Margrete の譜面規則を検証するための開発用プラグイン（配布物には含めない）"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+marmkmt = { path = "../../crates/marmkmt" }
+
+# sound2slide のワークスペースには含めない独立したクレート
+[workspace]
