@@ -47,6 +47,11 @@ ABI 1 のフィールド順序や意味は固定です。将来の追加はテ�
 テストで検証されています。フィールド定義と `MG_NOTE_*` / `MG_EVENT_KIND_*` の値は
 [`include/marmkmt.h`](../include/marmkmt.h) を参照してください。浮動小数点の speed と BPM は有限値だけを受け付けます。
 
+AIR-CRUSH線の描画軸は `ex_attr` で指定できます。
+X軸は `MG_NOTE_EX_ATTR_NONE`、Y軸は `MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Y`、
+Z軸は `MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Z` です。Y軸とZ軸の属性はAIR-CRUSHにのみ指定できます。
+レインボーンでは始点に軸を指定し、子ノーツの属性は `MG_NOTE_EX_ATTR_NONE` にします。
+
 ## `MgPluginApi`
 
 プラグインが `mg_plugin_init` で返す callback テーブルです。`plugin_data` は全 callback の

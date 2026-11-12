@@ -1,4 +1,5 @@
 pub(crate) const LANE_COUNT: i32 = 16;
+pub(crate) const EXTENDED_LANE_COUNT: i32 = 48;
 pub(crate) const TICKS_PER_BEAT: i32 = 480;
 const MAX_WINDOWS: i32 = 20_000;
 
@@ -20,6 +21,7 @@ impl SilentZone {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Settings {
+    pub extended_field: bool,
     pub bpm: f64,
     pub time_signature: [i32; 2],
     pub offset_sec: f64,
@@ -40,6 +42,7 @@ pub(crate) struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            extended_field: false,
             bpm: 120.0,
             time_signature: [4, 4],
             offset_sec: 0.0,
@@ -64,6 +67,20 @@ pub(crate) struct SlidePoint {
     pub x: i32,
     pub width: i32,
     pub control: bool,
+}
+
+impl SlidePoint {
+    fn constrain_to_field(&mut self, extended_field: bool) {
+        self.width = self.width.clamp(1, LANE_COUNT);
+        let (left, right) = if extended_field { (-16, 32) } else { (0, 16) };
+        self.x = self.x.clamp(left, right - self.width);
+    }
+
+    pub(crate) fn is_within_extended_field(&self) -> bool {
+        (1..=LANE_COUNT).contains(&self.width)
+            && self.x >= -16
+            && i64::from(self.x) + i64::from(self.width) <= 32
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -100,8 +117,8 @@ pub(crate) fn ticks_per_second(bpm: f64, [numerator, denominator]: [i32; 2]) -> 
 }
 
 pub(crate) fn centered_x(width: i32) -> i32 {
-    let width = width.clamp(1, LANE_COUNT);
-    (LANE_COUNT - width + 1) / 2
+    let width = width.clamp(1, EXTENDED_LANE_COUNT);
+    (LANE_COUNT - width + 1).div_euclid(2)
 }
 
 pub(crate) fn symmetric_width_from_amplitude(magnitude: f32, max_width: i32) -> (i32, i32) {
@@ -116,8 +133,11 @@ const MIDDLE_HALF_LANE: i32 = LANE_COUNT;
 
 /// Converts a center in half lanes to a width 1 note (odd) or a width 2 note (even).
 fn note_from_half_lane(center: i32) -> (i32, i32) {
-    let center = center.clamp(1, 2 * LANE_COUNT - 1);
-    if center % 2 == 1 {
+    let center = center.clamp(
+        MIDDLE_HALF_LANE - EXTENDED_LANE_COUNT + 1,
+        MIDDLE_HALF_LANE + EXTENDED_LANE_COUNT - 1,
+    );
+    if center.rem_euclid(2) == 1 {
         ((center - 1) / 2, 1)
     } else {
         (center / 2 - 1, 2)
@@ -130,7 +150,7 @@ fn half_lane_center(x: i32, width: i32) -> i32 {
 
 /// Farthest the center may move from the middle, in half lanes.
 fn half_lane_reach(max_width: i32) -> i32 {
-    max_width.clamp(2, LANE_COUNT) - 1
+    max_width.clamp(2, EXTENDED_LANE_COUNT) - 1
 }
 
 pub(crate) fn amplitude_to_fine_note(signed: f32, max_width: i32) -> (i32, i32) {
@@ -140,7 +160,7 @@ pub(crate) fn amplitude_to_fine_note(signed: f32, max_width: i32) -> (i32, i32) 
 
 pub(crate) fn amplitude_to_x(signed: f32, width: i32, max_width: i32) -> i32 {
     let width = width.clamp(1, LANE_COUNT);
-    let max_width = max_width.clamp(2, LANE_COUNT).max(width);
+    let max_width = max_width.clamp(2, EXTENDED_LANE_COUNT).max(width);
     let left = centered_x(max_width);
     let right = left + max_width - width;
     let center = centered_x(width);
@@ -170,6 +190,15 @@ pub(crate) fn generate_with_silent_zones(
     settings: &Settings,
     silent_zones: &[SilentZone],
 ) -> Generated {
+    let mut bounded = *settings;
+    let lane_count = if settings.extended_field {
+        EXTENDED_LANE_COUNT
+    } else {
+        LANE_COUNT
+    };
+    bounded.width = bounded.width.clamp(1, LANE_COUNT);
+    bounded.max_width = bounded.max_width.clamp(2, lane_count);
+    let settings = &bounded;
     if samples.is_empty() || sample_rate == 0 || settings.bpm <= 0.0 {
         return Generated::default();
     }
@@ -356,6 +385,9 @@ fn flush(segment: &mut Vec<RawPoint>, slides: &mut Vec<Slide>, settings: &Settin
             });
         }
     }
+    for point in &mut points {
+        point.constrain_to_field(settings.extended_field);
+    }
     if points.len() >= 2 && points.last().expect("point").tick > points[0].tick {
         slides.push(Slide { points });
     }
@@ -379,7 +411,7 @@ fn insert_opposite_controls(points: Vec<SlidePoint>, max_width: i32) -> Vec<Slid
         if !same_side || gap < 2 {
             continue;
         }
-        let max_width = max_width.clamp(2, LANE_COUNT).max(current.width);
+        let max_width = max_width.clamp(2, EXTENDED_LANE_COUNT).max(current.width);
         let left = centered_x(max_width);
         let right = left + max_width - current.width;
         let center_x = centered_x(current.width);
@@ -512,8 +544,113 @@ fn window_stats(
 mod tests {
     use super::*;
 
+    #[test]
+    fn extended_field_preserves_the_sixteen_lane_note_width_limit() {
+        let mut options = settings(2.0);
+        options.extended_field = true;
+        options.width = 48;
+        options.max_width = 48;
+        let samples = [-1.0, 1.0, -0.5, 0.5];
+        for symmetric in [false, true] {
+            options.symmetric_width = symmetric;
+            let output = generate(&samples, 2, 0, &options);
+            assert!(!output.slides.is_empty());
+            assert!(
+                output
+                    .slides
+                    .iter()
+                    .flat_map(|s| &s.points)
+                    .all(|p| p.width <= 16)
+            );
+        }
+    }
+
+    #[test]
+    fn extended_waveforms_keep_the_original_center_and_reach_both_edges() {
+        assert_eq!(amplitude_to_x(-1.0, 4, 48), -16);
+        assert_eq!(amplitude_to_x(0.0, 4, 48), 6);
+        assert_eq!(amplitude_to_x(1.0, 4, 48), 28);
+        for span in 17..=48 {
+            let left = amplitude_to_x(-1.0, 4, span);
+            let right = amplitude_to_x(1.0, 4, span);
+            assert!(left >= -16 && right + 4 <= 32);
+            assert_eq!(right - left + 4, span);
+        }
+    }
+
+    #[test]
+    fn fine_extended_waveforms_cover_negative_half_lanes_without_losing_the_center() {
+        assert_eq!(amplitude_to_fine_note(-1.0, 48), (-16, 1));
+        assert_eq!(amplitude_to_fine_note(0.0, 48), (7, 2));
+        assert_eq!(amplitude_to_fine_note(1.0, 48), (31, 1));
+        for center in -31..=63 {
+            let (x, width) = note_from_half_lane(center);
+            assert_eq!(2 * x + width, center);
+            assert!(x >= -16 && x + width <= 32);
+        }
+    }
+
+    #[test]
+    fn field_mode_bounds_normal_and_fine_generation_including_mirrored_controls() {
+        let samples = [1.0, 0.7, -1.0, -0.6, 0.9, -0.8];
+        for extended in [false, true] {
+            for fine in [false, true] {
+                let mut options = settings(3.0);
+                options.extended_field = extended;
+                options.max_width = 48;
+                options.fine_center = fine;
+                options.zigzag = true;
+                let output = generate(&samples, 2, 0, &options);
+                let (left, right) = if extended { (-16, 32) } else { (0, 16) };
+                let points: Vec<_> = output
+                    .slides
+                    .iter()
+                    .flat_map(|slide| &slide.points)
+                    .collect();
+                assert!(!points.is_empty());
+                assert!(points.iter().all(|p| p.x >= left && p.x + p.width <= right));
+                assert!(points.iter().any(|p| p.x == left));
+                assert!(points.iter().any(|p| p.x + p.width == right));
+            }
+        }
+    }
+
+    #[test]
+    fn every_generation_mode_keeps_all_points_inside_the_selected_field() {
+        let samples = [1.0, 0.6, -1.0, -0.7, 0.9, -0.5];
+        for extended in [false, true] {
+            for fine in [false, true] {
+                for symmetric in [false, true] {
+                    for center_ends in [false, true] {
+                        for width in [i32::MIN, 1, 4, 15, 16, 48, i32::MAX] {
+                            for span in [i32::MIN, 2, 15, 16, 17, 47, 48, i32::MAX] {
+                                let mut options = settings(3.0);
+                                options.extended_field = extended;
+                                options.fine_center = fine;
+                                options.symmetric_width = symmetric;
+                                options.center_ends = center_ends;
+                                options.zigzag = true;
+                                options.width = width;
+                                options.max_width = span;
+                                let output = generate(&samples, 2, 0, &options);
+                                assert!(!output.slides.is_empty());
+                                for point in output.slides.iter().flat_map(|slide| &slide.points) {
+                                    assert!(point.is_within_extended_field());
+                                    if !extended {
+                                        assert!(point.x >= 0 && point.x + point.width <= 16);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn settings(length: f64) -> Settings {
         Settings {
+            extended_field: false,
             bpm: 120.0,
             time_signature: [4, 4],
             offset_sec: 0.0,

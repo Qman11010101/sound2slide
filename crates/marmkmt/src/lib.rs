@@ -367,6 +367,13 @@ pub struct Direction(pub i32);
 /// 拡張属性。未知値も保持する。
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
 pub struct ExtraAttribute(pub i32);
+impl ExtraAttribute {
+    /// AIR-CRUSH 線の Y 軸指定。
+    pub const AIR_CRUSH_AXIS_Y: Self = Self(sys::MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Y);
+    /// AIR-CRUSH 線の Z 軸指定。
+    pub const AIR_CRUSH_AXIS_Z: Self = Self(sys::MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Z);
+}
+
 /// ノートの値データ。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NoteInfo {
@@ -1260,6 +1267,28 @@ fn ffi_boundary(f: impl FnOnce() -> i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn air_crush_axis_attributes_survive_note_info_conversion() {
+        for (axis, expected) in [
+            (ExtraAttribute::default(), 0),
+            (ExtraAttribute::AIR_CRUSH_AXIS_Y, 4),
+            (ExtraAttribute::AIR_CRUSH_AXIS_Z, 5),
+        ] {
+            let note = NoteInfo {
+                note_type: NoteType::AIR_CRUSH,
+                long_attribute: LongAttribute::BEGIN,
+                extra_attribute: axis,
+                x: -16,
+                width: 1,
+                height: 80,
+                ..Default::default()
+            };
+            let raw = sys::MgNoteInfo::from(note);
+            assert_eq!(raw.ex_attr, expected);
+            assert_eq!(NoteInfo::from(raw), note);
+        }
+    }
 
     #[test]
     fn result_codes_preserve_unknown_values() {

@@ -123,10 +123,49 @@ pub(crate) fn color(id: i32) -> &'static LineColor {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Axis {
+    #[default]
+    X,
+    Y,
+    Z,
+}
+
+impl Axis {
+    pub fn extra_attribute(self) -> marmkmt::ExtraAttribute {
+        match self {
+            Self::X => marmkmt::ExtraAttribute::default(),
+            Self::Y => marmkmt::ExtraAttribute::AIR_CRUSH_AXIS_Y,
+            Self::Z => marmkmt::ExtraAttribute::AIR_CRUSH_AXIS_Z,
+        }
+    }
+
+    pub fn label(self, lang: crate::i18n::Lang) -> &'static str {
+        match self {
+            Self::X => lang.pick(["X軸", "X axis", "X軸", "X축"]),
+            Self::Y => lang.pick([
+                "Y軸（左右）",
+                "Y axis (horizontal)",
+                "Y軸（左右）",
+                "Y축 (좌우)",
+            ]),
+            Self::Z => lang.pick([
+                "Z軸（縦）",
+                "Z axis (vertical)",
+                "Z軸（垂直）",
+                "Z축 (세로)",
+            ]),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Output {
     #[default]
     Slide,
+    /// Slide variation 35 (Z), stored on the head only, hides the center line.
+    SlideNoCenterLine,
     Rainbone {
+        axis: Axis,
         color: i32,
         height: i32,
     },

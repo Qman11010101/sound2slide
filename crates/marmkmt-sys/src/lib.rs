@@ -74,6 +74,8 @@ pub const MG_NOTE_EX_ATTR_NONE: MgInt = 0;
 pub const MG_NOTE_EX_ATTR_INVERT: MgInt = 1;
 pub const MG_NOTE_EX_ATTR_HAS_NOTE: MgInt = 2;
 pub const MG_NOTE_EX_ATTR_EXJDG: MgInt = 3;
+pub const MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Y: MgInt = 4;
+pub const MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Z: MgInt = 5;
 pub const MG_OPTION_AIRCRUSH_TRACE_LIKE: MgInt = 0;
 pub const MG_OPTION_AIRCRUSH_HEAD_ONLY: MgInt = i32::MAX;
 

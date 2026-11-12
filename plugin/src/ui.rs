@@ -4,6 +4,7 @@ use eframe::egui;
 
 use crate::{
     audio::{self, Audio},
+    audit::Audit,
     generate::{self, Generated, Settings, SilentZone, Slide, TICKS_PER_BEAT, ticks_per_second},
     i18n::{Lang, Msg},
     mgxc,
@@ -46,6 +47,7 @@ pub(crate) fn open(
     start_tick: i32,
     lookup_bpm: &dyn Fn(i32) -> Result<Option<f64>, Msg>,
     lookup_signature: &dyn Fn(i32) -> Result<Option<[i32; 2]>, Msg>,
+    chart_uses_extended_field: bool,
 ) -> Result<Option<Commit>, String> {
     let output = Arc::new(Mutex::new(None));
     let app_output = Arc::clone(&output);
@@ -68,6 +70,8 @@ pub(crate) fn open(
             host.attach(creation).map_err(std::io::Error::other)?;
             creation.egui_ctx.set_visuals(egui::Visuals::dark());
             let mut app = Sound2SlideApp::new(start_tick, app_output, lookup_bpm, lookup_signature);
+            app.host_extended_field = chart_uses_extended_field;
+            app.select_detected_field();
             app.host = Some(host);
             app.update_check = UpdateCheck::start();
             app.fonts = UiFonts::load();
@@ -90,6 +94,32 @@ fn zone_elapsed(inner: egui::Rect, y: f32, span: f64) -> f64 {
     f64::from(((inner.bottom() - y) / inner.height()).clamp(0.0, 1.0)) * span
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum FieldMode {
+    #[default]
+    Normal,
+    Extended,
+}
+
+impl FieldMode {
+    fn label(self, lang: Lang) -> &'static str {
+        match self {
+            Self::Normal => lang.pick([
+                "通常16レーン",
+                "Normal (16 lanes)",
+                "一般16軌",
+                "일반 16레인",
+            ]),
+            Self::Extended => lang.pick([
+                "拡張48レーン",
+                "Extended (48 lanes)",
+                "擴充48軌",
+                "확장 48레인",
+            ]),
+        }
+    }
+}
+
 struct OffsetSelection {
     position: ChartPosition,
     files: Vec<std::path::PathBuf>,
@@ -105,14 +135,24 @@ struct Sound2SlideApp<'a> {
     fonts: UiFonts,
     status: Msg,
     settings: Settings,
+    field_mode: FieldMode,
+    field_manually_selected: bool,
+    host_extended_field: bool,
+    chart_files: Vec<std::path::PathBuf>,
+    selected_chart: Option<std::path::PathBuf>,
+    selected_chart_extended: Option<bool>,
     bpm_note: Vec<Msg>,
     transparent_steps: bool,
     rainbone: bool,
+    slide_no_center_line: bool,
+    rainbone_axis: rainbone::Axis,
     rainbone_color: i32,
     rainbone_height: i32,
     rainbone_fine: bool,
     lane_divisions: i32,
     generated: Generated,
+    audit: Option<Audit>,
+    audit_output: Output,
     silent_zones: Vec<SilentZone>,
     cached_silent_zones: Vec<SilentZone>,
     editing_silent_zones: bool,
@@ -150,14 +190,24 @@ impl<'a> Sound2SlideApp<'a> {
             fonts: UiFonts::default(),
             status: Msg::OpenAudioPrompt,
             settings,
+            field_mode: FieldMode::Normal,
+            field_manually_selected: false,
+            host_extended_field: false,
+            chart_files: Vec::new(),
+            selected_chart: None,
+            selected_chart_extended: None,
             bpm_note: Vec::new(),
             transparent_steps: true,
             rainbone: false,
+            slide_no_center_line: false,
+            rainbone_axis: rainbone::Axis::default(),
             rainbone_color: 0,
             rainbone_height: rainbone::DEFAULT_HEIGHT,
             rainbone_fine: false,
             lane_divisions: 16,
             generated: Generated::default(),
+            audit: None,
+            audit_output: Output::Slide,
             silent_zones: Vec::new(),
             cached_silent_zones: Vec::new(),
             editing_silent_zones: false,
@@ -180,12 +230,16 @@ impl<'a> Sound2SlideApp<'a> {
     }
 
     fn refresh(&mut self) {
+        self.sync_field_mode();
         self.sync_silent_zones();
         let settings = self.generation_settings();
         if self.cached_generation == self.generation
             && self.cached_settings == settings
             && self.cached_silent_zones == self.silent_zones
         {
+            if self.audit_output != self.output() {
+                self.reset_audit();
+            }
             return;
         }
         self.generated = match &self.audio {
@@ -201,6 +255,89 @@ impl<'a> Sound2SlideApp<'a> {
         self.cached_generation = self.generation;
         self.cached_settings = settings;
         self.cached_silent_zones.clone_from(&self.silent_zones);
+        self.reset_audit();
+    }
+
+    fn reset_audit(&mut self) {
+        self.audit_output = self.output();
+        self.audit = self
+            .settings
+            .extended_field
+            .then(|| Audit::new(&self.generated.slides, self.rainbone));
+    }
+
+    fn audit_warnings(&mut self, ui: &mut egui::Ui) {
+        let Some(audit) = &mut self.audit else {
+            return;
+        };
+        if self.generated.slides.is_empty() {
+            return;
+        }
+        audit.advance(&self.generated.slides, self.lookup_bpm);
+        let lang = self.lang;
+        let color = egui::Color32::from_rgb(255, 180, 80);
+        if !audit.complete {
+            ui.label(lang.pick([
+                "48レーン校閲中…",
+                "Checking the 48-lane field…",
+                "正在檢查48軌…",
+                "48레인 검사 중…",
+            ]));
+            ui.ctx().request_repaint();
+        }
+        if let Some(error) = &audit.error {
+            ui.colored_label(
+                color,
+                lang.pick([
+                    format!("校閲を完了できませんでした：{}", error.text(lang)),
+                    format!("Could not complete the check: {}", error.text(lang)),
+                    format!("無法完成檢查：{}", error.text(lang)),
+                    format!("검사를 완료하지 못했습니다: {}", error.text(lang)),
+                ]),
+            );
+        }
+        if audit.count == 0 {
+            if audit.complete && audit.error.is_none() {
+                ui.label(lang.pick([
+                    "48レーン校閲：警告なし",
+                    "48-lane check: no warnings",
+                    "48軌檢查：無警告",
+                    "48레인 검사: 경고 없음",
+                ]));
+            }
+            return;
+        }
+        ui.colored_label(
+            color,
+            lang.pick([
+                format!("48レーン校閲：警告 {} 件", audit.count),
+                format!("48-lane check: {} warnings", audit.count),
+                format!("48軌檢查：{}項警告", audit.count),
+                format!("48레인 검사: 경고 {}개", audit.count),
+            ]),
+        );
+        ui.label(lang.pick([
+            "Margreteの譜面出力で弾かれる可能性があります。移動範囲を狭めるか、始点・終点を中央に寄せてください。警告があっても追加できます。",
+            "Margrete may reject chart export. Reduce the movement range or move the start/end toward the center. You can still add these notes.",
+            "Margrete可能拒絕匯出。請縮小移動範圍，或將起點、終點移向中央。有警告時仍可加入音符。",
+            "Margrete에서 채보 내보내기가 거부될 수 있습니다. 이동 범위를 줄이거나 시작점·끝점을 중앙으로 옮겨 주세요. 경고가 있어도 추가할 수 있습니다.",
+        ]));
+        ui.collapsing(lang.pick(["警告の詳細", "Warning details", "警告詳情", "경고 상세"]), |ui| {
+            ui.label(lang.pick([
+                "位置は譜面の絶対tickです。時間の境界は未確定のため、途中90 ms・終端40 msから警告します（AIRなし）。",
+                "Positions are absolute chart ticks. Boundaries are unverified, so warnings start at 90 ms mid-slide and 40 ms at the end (without AIR).",
+                "位置為譜面的絕對tick。邊界尚未確認，因此中途90 ms、末端40 ms起即顯示警告（無AIR）。",
+                "위치는 채보의 절대 tick입니다. 경계가 미확정이므로 중간 90 ms·끝 40 ms부터 경고합니다 (AIR 없음).",
+            ]));
+            egui::ScrollArea::vertical().id_salt("audit_details").max_height(180.0).show(ui, |ui| {
+                for warning in &audit.warnings {
+                    ui.label(format!("#{} / tick {}: {}", warning.slide + 1, warning.tick, warning.reason.text(lang)));
+                }
+                if audit.count > audit.warnings.len() {
+                    ui.label(lang.pick(["詳細は先頭100件まで表示します。", "Showing the first 100 warnings.", "僅顯示前100項警告。", "처음 100개 경고를 표시합니다."]));
+                }
+            });
+        });
     }
 
     fn open_file(&mut self, parent: &eframe::Frame) {
@@ -267,6 +404,13 @@ impl<'a> Sound2SlideApp<'a> {
         } else {
             audio.duration_secs()
         };
+        self.chart_files = mgxc::candidates(path);
+        let selected = if self.chart_files.len() == 1 {
+            self.chart_files.first().cloned()
+        } else {
+            None
+        };
+        self.select_chart(selected);
         self.path = path.display().to_string();
         self.audio = Some(audio);
         self.generation += 1;
@@ -295,15 +439,23 @@ impl<'a> Sound2SlideApp<'a> {
     fn resolve_chart_offset(&mut self, position: ChartPosition, files: Vec<std::path::PathBuf>) {
         match files.as_slice() {
             [] => self.apply_chart_position(position),
-            [file] => self.apply_chart_position(ChartPosition {
-                seconds: position.seconds - mgxc::read_offset(file),
-                ..position
-            }),
+            [file] => {
+                self.select_chart(Some(file.clone()));
+                self.apply_chart_position(ChartPosition {
+                    seconds: position.seconds - mgxc::read_offset(file),
+                    ..position
+                });
+            }
             _ => {
+                let selected = self
+                    .selected_chart
+                    .as_ref()
+                    .and_then(|selected| files.iter().position(|file| file == selected))
+                    .unwrap_or(0);
                 self.offset_selection = Some(OffsetSelection {
                     position,
                     files,
-                    selected: 0,
+                    selected,
                 });
             }
         }
@@ -313,6 +465,9 @@ impl<'a> Sound2SlideApp<'a> {
         let Some(selection) = self.offset_selection.take() else {
             return;
         };
+        if use_selected {
+            self.select_chart(selection.files.get(selection.selected).cloned());
+        }
         let offset = if use_selected {
             selection
                 .files
@@ -542,6 +697,7 @@ impl<'a> Sound2SlideApp<'a> {
             }
         });
         ui.separator();
+        self.field_controls(ui);
         self.output_controls(ui);
         let fine_rainbone = self.fine_rainbone();
         if !fine_rainbone {
@@ -622,8 +778,14 @@ impl<'a> Sound2SlideApp<'a> {
         if !self.settings.symmetric_width {
             self.settings.max_width = self.settings.max_width.max(self.settings.width);
         }
+        let maximum_span =
+            if self.settings.extended_field && (!self.settings.symmetric_width || fine_rainbone) {
+                48
+            } else {
+                16
+            };
         ui.add(
-            egui::Slider::new(&mut self.settings.max_width, 2..=16)
+            egui::Slider::new(&mut self.settings.max_width, 2..=maximum_span)
                 .text(lang.pick(["最大幅", "Max width", "最大寬度", "최대 폭"])),
         )
         .on_hover_text(lang.pick([
@@ -648,6 +810,8 @@ impl<'a> Sound2SlideApp<'a> {
             );
         }
         ui.separator();
+        self.refresh();
+        self.audit_warnings(ui);
         let notes: usize = self
             .generated
             .slides
@@ -713,9 +877,12 @@ impl Sound2SlideApp<'_> {
     fn output(&self) -> Output {
         if self.rainbone {
             Output::Rainbone {
+                axis: self.rainbone_axis,
                 color: self.rainbone_color,
                 height: self.rainbone_height,
             }
+        } else if self.slide_no_center_line {
+            Output::SlideNoCenterLine
         } else {
             Output::Slide
         }
@@ -733,6 +900,119 @@ impl Sound2SlideApp<'_> {
             settings.symmetric_width = false;
         }
         settings
+    }
+
+    fn select_chart(&mut self, path: Option<std::path::PathBuf>) {
+        self.selected_chart_extended = path.as_deref().and_then(mgxc::read_extended_field);
+        self.selected_chart = path;
+        self.select_detected_field();
+    }
+
+    fn detected_extended_field(&self) -> Option<bool> {
+        if self.host_extended_field {
+            Some(true)
+        } else {
+            self.selected_chart_extended
+        }
+    }
+
+    fn select_detected_field(&mut self) {
+        if !self.field_manually_selected {
+            self.field_mode = if self.detected_extended_field().unwrap_or(false) {
+                FieldMode::Extended
+            } else {
+                FieldMode::Normal
+            };
+        }
+        self.sync_field_mode();
+    }
+
+    fn select_field_mode(&mut self, mode: FieldMode) {
+        self.field_manually_selected = true;
+        self.field_mode = mode;
+        self.sync_field_mode();
+    }
+
+    fn sync_field_mode(&mut self) {
+        let previous_limit = if self.settings.extended_field { 48 } else { 16 };
+        self.settings.extended_field = match self.field_mode {
+            FieldMode::Normal => false,
+            FieldMode::Extended => true,
+        };
+        let limit = if self.settings.extended_field { 48 } else { 16 };
+        if limit != previous_limit && self.settings.max_width == previous_limit {
+            self.settings.max_width = limit;
+        }
+        self.settings.width = self.settings.width.clamp(1, 16);
+        self.settings.max_width = self.settings.max_width.clamp(2, limit);
+    }
+
+    fn field_controls(&mut self, ui: &mut egui::Ui) {
+        let lang = self.lang;
+        ui.horizontal(|ui| {
+            ui.label(lang.pick(["フィールド", "Field", "遊戲區域", "필드"]));
+            egui::ComboBox::from_id_salt("field_mode")
+                .selected_text(self.field_mode.label(lang))
+                .show_ui(ui, |ui| {
+                    for mode in [FieldMode::Normal, FieldMode::Extended] {
+                        if ui
+                            .selectable_label(self.field_mode == mode, mode.label(lang))
+                            .clicked()
+                        {
+                            self.select_field_mode(mode);
+                        }
+                    }
+                });
+        });
+        if !self.field_manually_selected {
+            if !self.chart_files.is_empty() {
+                let mut selected = self.selected_chart.clone();
+                ui.label(lang.pick([
+                    "判定元の譜面",
+                    "Chart for detection",
+                    "判定來源譜面",
+                    "판정할 채보",
+                ]));
+                egui::ComboBox::from_id_salt("field_chart")
+                    .width(180.0)
+                    .selected_text(
+                        selected
+                            .as_ref()
+                            .and_then(|p| p.file_name())
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| {
+                                lang.pick(["未選択", "Not selected", "未選擇", "선택 안 함"])
+                                    .into()
+                            }),
+                    )
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut selected,
+                            None,
+                            lang.pick(["未選択", "Not selected", "未選擇", "선택 안 함"]),
+                        );
+                        for file in &self.chart_files {
+                            ui.selectable_value(
+                                &mut selected,
+                                Some(file.clone()),
+                                file.file_name().unwrap_or_default().to_string_lossy(),
+                            );
+                        }
+                    });
+                if selected != self.selected_chart {
+                    self.select_chart(selected);
+                }
+            }
+            if self.selected_chart.is_some() {
+                ui.small(lang.pick([
+                    "保存済みの設定を参照します。未保存の変更は反映されません。",
+                    "Uses saved settings; unsaved changes are not reflected.",
+                    "使用已儲存的設定，不反映尚未儲存的變更。",
+                    "저장된 설정을 사용하며 저장하지 않은 변경은 반영되지 않습니다.",
+                ]));
+            }
+        }
+        self.sync_field_mode();
     }
 
     fn output_controls(&mut self, ui: &mut egui::Ui) {
@@ -757,8 +1037,34 @@ impl Sound2SlideApp<'_> {
             ]));
         });
         if !self.rainbone {
+            ui.checkbox(
+                &mut self.slide_no_center_line,
+                lang.pick([
+                    "中央線を表示しない",
+                    "Hide center line",
+                    "不顯示中央線",
+                    "중앙선 숨기기",
+                ]),
+            );
             return;
         }
+        ui.horizontal(|ui| {
+            ui.label(lang.pick(["線の軸", "Line axis", "線的軸向", "선 축"]));
+            egui::ComboBox::from_id_salt("rainbone_axis")
+                .selected_text(self.rainbone_axis.label(lang))
+                .show_ui(ui, |ui| {
+                    for axis in [rainbone::Axis::X, rainbone::Axis::Y, rainbone::Axis::Z] {
+                        ui.selectable_value(&mut self.rainbone_axis, axis, axis.label(lang));
+                    }
+                })
+                .response
+                .on_hover_text(lang.pick([
+                    "線の描画軸を指定します。プレビューは配置経路を表示し、軸による立体的な描画の違いは再現しません。",
+                    "Sets the line rendering axis. The preview shows the path, without reproducing its 3D orientation.",
+                    "指定線的繪製軸向。預覽顯示配置路徑，不重現軸向造成的立體繪製差異。",
+                    "선의 렌더링 축을 지정합니다. 미리보기는 배치 경로를 표시하며 축에 따른 입체 표현 차이는 재현하지 않습니다.",
+                ]));
+        });
         ui.horizontal(|ui| {
             ui.label(lang.pick(["線の色", "Line color", "線的顏色", "선 색"]));
             let selected = rainbone::color(self.rainbone_color);
@@ -1444,6 +1750,11 @@ fn preview_click_position(
     Some((start + fraction * (end - start)).clamp(start, last_sample))
 }
 
+fn lane_fraction(lane: f32, extended: bool) -> f32 {
+    let (left, span) = if extended { (-16.0, 48.0) } else { (0.0, 16.0) };
+    ((lane - left) / span).clamp(0.0, 1.0)
+}
+
 fn paint_preview(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -1509,15 +1820,26 @@ fn paint_preview(
         }
     }
     let lane_x = |lane: f32| -> f32 {
-        let t = (lane / 16.0).clamp(0.0, 1.0);
+        let t = lane_fraction(lane, settings.extended_field);
         inner.left() + t * inner.width()
     };
     if lane_divisions > 0 {
-        for division in 0..=lane_divisions {
-            let x = lane_x(division as f32 * 16.0 / lane_divisions as f32);
+        let panels = if settings.extended_field { 3 } else { 1 };
+        let left = if settings.extended_field { -16.0 } else { 0.0 };
+        for division in 0..=lane_divisions * panels {
+            let x = lane_x(left + division as f32 * 16.0 / lane_divisions as f32);
             painter.line_segment(
                 [egui::pos2(x, inner.top()), egui::pos2(x, inner.bottom())],
                 egui::Stroke::new(1.0, egui::Color32::from_white_alpha(16)),
+            );
+        }
+    }
+    if settings.extended_field {
+        for lane in [0.0, 16.0] {
+            let x = lane_x(lane);
+            painter.line_segment(
+                [egui::pos2(x, inner.top()), egui::pos2(x, inner.bottom())],
+                egui::Stroke::new(1.5, egui::Color32::from_rgb(100, 155, 205)),
             );
         }
     }
@@ -1557,6 +1879,7 @@ fn paint_preview(
         paint_slider(
             painter,
             slide,
+            output != Output::SlideNoCenterLine,
             start_tick,
             settings.offset_sec,
             ticks_per_second,
@@ -1576,6 +1899,7 @@ fn paint_preview(
 fn paint_slider(
     painter: &egui::Painter,
     slide: &Slide,
+    show_center_line: bool,
     start_tick: i32,
     offset_sec: f64,
     ticks_per_second: f64,
@@ -1639,7 +1963,7 @@ fn paint_slider(
     // The center line keeps a constant horizontal width, so it gets thinner the more a
     // segment leans sideways, just like the in-game slide.
     let half = egui::vec2(1.2, 0.0);
-    for pair in placed.windows(2) {
+    for pair in placed.windows(2).filter(|_| show_center_line) {
         let (mut top, mut bottom) = (pair[0].1, pair[1].1);
         if top.y > bottom.y {
             std::mem::swap(&mut top, &mut bottom);
@@ -1926,6 +2250,177 @@ mod tests {
     use crate::{audio::Audio, generate::SilentZone, i18n::Msg, timing::ChartPosition};
     use eframe::egui;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn field_and_output_changes_replace_warnings_without_changing_generated_notes() {
+        let mut app = zone_test_app();
+        app.select_field_mode(super::FieldMode::Extended);
+        app.refresh();
+        let original = app.generated.clone();
+        let audit = app.audit.as_mut().unwrap();
+        audit.advance(&app.generated.slides, app.lookup_bpm);
+        assert!(audit.count > 0);
+        app.refresh();
+        assert!(app.audit.as_ref().unwrap().count > 0);
+        app.rainbone = true;
+        app.refresh();
+        assert_eq!(app.generated, original);
+        assert_eq!(app.audit.as_ref().unwrap().count, 0);
+        assert!(app.audit.as_ref().unwrap().complete);
+        app.rainbone = false;
+        app.refresh();
+        assert!(app.audit.as_ref().unwrap().count > 0);
+        app.settings.max_width = 16;
+        app.refresh();
+        assert_eq!(app.audit.as_ref().unwrap().count, 0);
+        assert!(app.audit.as_ref().unwrap().complete);
+        app.select_field_mode(super::FieldMode::Normal);
+        app.refresh();
+        assert!(app.audit.is_none());
+    }
+
+    fn saved_chart(extended: bool, offset: f64) -> Vec<u8> {
+        let mut metadata = b"xfld\x01\x00".to_vec();
+        metadata.extend_from_slice(&u16::from(extended).to_le_bytes());
+        metadata.extend_from_slice(b"wvof\x03\x00\x00\x00");
+        metadata.extend_from_slice(&offset.to_le_bytes());
+        let mut bytes = b"MGXC".to_vec();
+        bytes.extend_from_slice(&(12 + metadata.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&4u32.to_le_bytes());
+        bytes.extend_from_slice(b"meta");
+        bytes.extend_from_slice(&(metadata.len() as u32).to_le_bytes());
+        bytes.extend(metadata);
+        bytes
+    }
+
+    #[test]
+    fn audio_loading_detects_a_single_chart_without_timing_scan_and_clears_old_sources() {
+        let directory = std::env::temp_dir().join(format!(
+            "sound2slide-field-choice-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("extended.mgxc");
+        std::fs::write(&path, saved_chart(true, 1.25)).unwrap();
+        let audio = || Audio {
+            samples: vec![0.1; 10].into(),
+            sample_rate: 10,
+        };
+        let mut app = zone_test_app();
+        app.accept_audio(&directory.join("song.wav"), audio());
+        assert!(app.position_scan.is_none());
+        assert_eq!(app.selected_chart.as_ref(), Some(&path));
+        assert!(app.settings.extended_field);
+        assert_eq!(app.settings.offset_sec, 0.0);
+        std::fs::create_dir(directory.join("other")).unwrap();
+        app.accept_audio(&directory.join("other/song.wav"), audio());
+        assert!(app.selected_chart.is_none());
+        assert_eq!(app.detected_extended_field(), None);
+        assert!(!app.settings.extended_field);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn hidden_center_line_applies_only_to_slides_and_preserves_geometry() {
+        use crate::rainbone::Output;
+        let mut app = zone_test_app();
+        assert_eq!(app.output(), Output::Slide);
+        let settings = app.generation_settings();
+        app.slide_no_center_line = true;
+        assert_eq!(app.output(), Output::SlideNoCenterLine);
+        assert_eq!(app.generation_settings(), settings);
+        app.rainbone = true;
+        assert!(matches!(app.output(), Output::Rainbone { .. }));
+        app.rainbone = false;
+        assert_eq!(app.output(), Output::SlideNoCenterLine);
+    }
+
+    #[test]
+    fn rainbone_axis_selection_preserves_waveform_geometry_and_slide_output() {
+        use crate::rainbone::{Axis, Output};
+        let mut app = zone_test_app();
+        assert_eq!(app.rainbone_axis, Axis::X);
+        app.rainbone = true;
+        app.refresh();
+        let original = app.generated.clone();
+        for axis in [Axis::X, Axis::Y, Axis::Z] {
+            app.rainbone_axis = axis;
+            app.refresh();
+            assert_eq!(app.generated, original);
+            assert_eq!(
+                app.output(),
+                Output::Rainbone {
+                    axis,
+                    color: 0,
+                    height: 80
+                }
+            );
+        }
+        app.rainbone = false;
+        assert_eq!(app.output(), Output::Slide);
+    }
+
+    #[test]
+    fn detected_fields_select_a_concrete_mode_and_manual_choices_are_preserved() {
+        use super::FieldMode;
+        let mut app = zone_test_app();
+        assert_eq!(app.field_mode, FieldMode::Normal);
+        app.selected_chart_extended = Some(true);
+        app.select_detected_field();
+        app.refresh();
+        assert_eq!(app.field_mode, FieldMode::Extended);
+        assert!(app.settings.extended_field);
+        assert_eq!(app.settings.max_width, 48);
+        app.selected_chart_extended = Some(false);
+        app.select_detected_field();
+        assert_eq!(app.field_mode, FieldMode::Normal);
+        assert_eq!(app.settings.max_width, 16);
+        app.host_extended_field = true;
+        app.select_detected_field();
+        assert_eq!(app.field_mode, FieldMode::Extended);
+        app.select_field_mode(FieldMode::Normal);
+        app.select_detected_field();
+        app.refresh();
+        assert_eq!(app.field_mode, FieldMode::Normal);
+        assert!(!app.settings.extended_field);
+        assert_eq!(app.settings.max_width, 16);
+        app.select_chart(None);
+        assert_eq!(app.field_mode, FieldMode::Normal);
+        app.host_extended_field = false;
+        app.select_field_mode(FieldMode::Extended);
+        app.select_chart(None);
+        app.refresh();
+        assert_eq!(app.field_mode, FieldMode::Extended);
+        assert!(app.settings.extended_field);
+    }
+
+    #[test]
+    fn choosing_the_current_field_also_prevents_later_detection_from_overriding_it() {
+        use super::FieldMode;
+        let mut app = zone_test_app();
+        app.select_field_mode(FieldMode::Normal);
+        app.host_extended_field = true;
+        app.select_detected_field();
+        assert_eq!(app.field_mode, FieldMode::Normal);
+        assert!(!app.settings.extended_field);
+    }
+
+    #[test]
+    fn extended_preview_keeps_the_normal_field_in_the_middle_third() {
+        use super::lane_fraction;
+        assert_eq!(lane_fraction(-16.0, true), 0.0);
+        assert_eq!(lane_fraction(0.0, true), 1.0 / 3.0);
+        assert_eq!(lane_fraction(8.0, true), 0.5);
+        assert_eq!(lane_fraction(16.0, true), 2.0 / 3.0);
+        assert_eq!(lane_fraction(32.0, true), 1.0);
+        assert_eq!(lane_fraction(0.0, false), 0.0);
+        assert_eq!(lane_fraction(8.0, false), 0.5);
+        assert_eq!(lane_fraction(16.0, false), 1.0);
+    }
 
     #[test]
     fn fine_reproduction_applies_only_to_rainbones() {
@@ -2375,7 +2870,7 @@ mod tests {
         let first = directory.join("a.mgxc");
         let second = directory.join("b.mgxc");
         std::fs::write(&first, b"MGCF0\nBGMOFFSET\t1.0\n").unwrap();
-        std::fs::write(&second, b"MGCF0\nBGMOFFSET\t-1.55\n").unwrap();
+        std::fs::write(&second, saved_chart(true, -1.55)).unwrap();
         let lookup_bpm = |_| Ok(None);
         let lookup_signature = |_| Ok(None);
         let mut app = Sound2SlideApp::new(
@@ -2403,6 +2898,8 @@ mod tests {
         app.offset_selection.as_mut().unwrap().selected = 1;
         app.finish_offset_selection(true);
         assert_eq!(app.settings.offset_sec, 11.55);
+        assert_eq!(app.detected_extended_field(), Some(true));
+        assert!(app.settings.extended_field);
         assert!(app.offset_selection.is_none());
         assert!(app.can_play());
         app.resolve_chart_offset(position, vec![first, second]);
