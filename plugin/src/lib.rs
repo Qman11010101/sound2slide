@@ -1,4 +1,5 @@
 mod audio;
+mod audit;
 mod generate;
 mod i18n;
 mod mgxc;
@@ -56,7 +57,16 @@ impl Command for Sound2SlideCommand {
         let lookup = |tick: i32| chart_bpm(chart.as_ref(), tick);
         let lookup_signature = |bar: i32| chart_time_signature(chart.as_ref(), bar);
         let opened = catch_unwind(AssertUnwindSafe(|| {
-            ui::open(&host, start_tick, &lookup, &lookup_signature)
+            ui::open(
+                &host,
+                start_tick,
+                &lookup,
+                &lookup_signature,
+                chart
+                    .as_ref()
+                    .and_then(|chart| chart_uses_extended_field(chart).ok())
+                    .unwrap_or(false),
+            )
         }));
         let commit = match opened {
             Ok(Ok(commit)) => commit,
@@ -68,6 +78,26 @@ impl Command for Sound2SlideCommand {
         };
         write_slides(context, &commit)
     }
+}
+
+fn chart_uses_extended_field(chart: &marmkmt::Chart<'_>) -> Result<bool> {
+    let mut pending = Vec::new();
+    for index in 0..chart.notes_count()? {
+        pending.push(chart.note(index)?);
+    }
+    while let Some(note) = pending.pop() {
+        let info = note.info()?;
+        if info.note_type != NoteType::CLICK
+            && info.width > 0
+            && (info.x < 0 || i64::from(info.x) + i64::from(info.width) > 16)
+        {
+            return Ok(true);
+        }
+        for index in 0..note.children_count()? {
+            pending.push(note.child(index)?);
+        }
+    }
+    Ok(false)
 }
 
 fn chart_bpm(
@@ -115,6 +145,7 @@ fn write_slides(context: &mut Context<'_>, commit: &Commit) -> Result<()> {
     if commit.slides.is_empty() {
         return Err(plugin_err("追加できるスライドがありません"));
     }
+    validate_slide_bounds(&commit.slides)?;
     context.transaction(|edit| {
         let chart = edit.chart();
         for slide in &commit.slides {
@@ -125,6 +156,18 @@ fn write_slides(context: &mut Context<'_>, commit: &Commit) -> Result<()> {
         }
         Ok(())
     })
+}
+
+fn validate_slide_bounds(slides: &[generate::Slide]) -> Result<()> {
+    for point in slides.iter().flat_map(|slide| &slide.points) {
+        if !point.is_within_extended_field() {
+            return Err(plugin_err(format!(
+                "tick {}のノーツが48レーンの範囲内に収まらないため、追加を中止しました",
+                point.tick
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn write_one<'a>(
@@ -141,7 +184,9 @@ fn write_one<'a>(
             LongAttribute::BEGIN
         } else if index == last {
             LongAttribute::END
-        } else if point.control || (transparent_steps && output == Output::Slide) {
+        } else if point.control
+            || (transparent_steps && matches!(output, Output::Slide | Output::SlideNoCenterLine))
+        {
             LongAttribute::CONTROL
         } else {
             LongAttribute::STEP
@@ -172,12 +217,29 @@ fn note_info(point: &SlidePoint, attribute: LongAttribute, output: Output) -> No
     };
     match output {
         Output::Slide => base,
-        Output::Rainbone { color, height } => {
+        Output::SlideNoCenterLine => NoteInfo {
+            variation_id: if attribute == LongAttribute::BEGIN {
+                35
+            } else {
+                0
+            },
+            ..base
+        },
+        Output::Rainbone {
+            axis,
+            color,
+            height,
+        } => {
             let head = attribute == LongAttribute::BEGIN;
             // Margrete keeps the line color and the no-notes mode on the head note only.
             NoteInfo {
                 note_type: NoteType::AIR_CRUSH,
                 variation_id: if head { color } else { 0 },
+                extra_attribute: if head {
+                    axis.extra_attribute()
+                } else {
+                    Default::default()
+                },
                 height,
                 option_value: rainbone::LINE_ONLY,
                 ..base
@@ -191,8 +253,127 @@ mod tests {
     use super::*;
 
     #[test]
+    fn chart_write_rejects_out_of_field_points_and_invalid_widths_before_editing() {
+        let point = |x, width| SlidePoint {
+            tick: 123,
+            x,
+            width,
+            control: false,
+        };
+        let valid = generate::Slide {
+            points: vec![point(-16, 1), point(16, 16), point(31, 1)],
+        };
+        assert!(validate_slide_bounds(std::slice::from_ref(&valid)).is_ok());
+        for (x, width) in [
+            (-17, 1),
+            (32, 1),
+            (17, 16),
+            (0, 0),
+            (0, -1),
+            (0, 17),
+            (i32::MAX, i32::MAX),
+        ] {
+            let invalid = generate::Slide {
+                points: vec![point(0, 4), point(x, width)],
+            };
+            let error = validate_slide_bounds(&[valid.clone(), invalid]).unwrap_err();
+            assert!(error.to_string().contains("123"));
+        }
+    }
+
+    #[test]
+    fn rainbone_axis_matches_saved_head_attributes_and_preserves_child_attributes() {
+        use rainbone::Axis;
+        let point = SlidePoint {
+            tick: 5760,
+            x: -16,
+            width: 1,
+            control: false,
+        };
+        for (axis, expected) in [(Axis::X, 0), (Axis::Y, 4), (Axis::Z, 5)] {
+            let output = Output::Rainbone {
+                axis,
+                color: 3,
+                height: 80,
+            };
+            let head = note_info(&point, LongAttribute::BEGIN, output);
+            assert_eq!(head.extra_attribute.0, expected);
+            assert_eq!(
+                (head.x, head.width, head.tick, head.height),
+                (-16, 1, 5760, 80)
+            );
+            assert_eq!((head.variation_id, head.option_value), (3, 0));
+            for attribute in [
+                LongAttribute::STEP,
+                LongAttribute::CONTROL,
+                LongAttribute::END,
+            ] {
+                let child = note_info(&point, attribute, output);
+                assert_eq!(
+                    (
+                        child.extra_attribute.0,
+                        child.variation_id,
+                        child.option_value
+                    ),
+                    (0, 0, 0)
+                );
+            }
+        }
+        let slide = note_info(&point, LongAttribute::BEGIN, Output::Slide);
+        assert_eq!(slide.extra_attribute.0, 0);
+    }
+
+    #[test]
+    fn no_center_line_matches_nolineslide_saved_by_margrete() {
+        // nolineslide.mgxc: the right-hand slide has variation 35 on its head
+        // (tick 0, x 8, width 4), and variation 0 on its end (tick 1920, x 12).
+        let point = |tick, x| SlidePoint {
+            tick,
+            x,
+            width: 4,
+            control: false,
+        };
+        let head = note_info(
+            &point(0, 8),
+            LongAttribute::BEGIN,
+            Output::SlideNoCenterLine,
+        );
+        assert_eq!(
+            (
+                head.note_type,
+                head.variation_id,
+                head.x,
+                head.width,
+                head.tick
+            ),
+            (NoteType::SLIDE, 35, 8, 4, 0)
+        );
+        for attribute in [
+            LongAttribute::STEP,
+            LongAttribute::CONTROL,
+            LongAttribute::END,
+        ] {
+            let child = note_info(&point(1920, 12), attribute, Output::SlideNoCenterLine);
+            let normal = note_info(&point(1920, 12), attribute, Output::Slide);
+            assert_eq!(child.variation_id, 0);
+            assert_eq!(child.note_type, normal.note_type);
+            assert_eq!(child.long_attribute, normal.long_attribute);
+            assert_eq!((child.x, child.width, child.tick), (12, 4, 1920));
+            assert_eq!(
+                (child.extra_attribute.0, child.height, child.option_value),
+                (0, 0, 0)
+            );
+        }
+        assert_eq!(
+            note_info(&point(0, 8), LongAttribute::BEGIN, Output::Slide).variation_id,
+            0
+        );
+    }
+
+    #[test]
     fn rainbone_matches_a_line_saved_by_margrete() {
         let output = Output::Rainbone {
+            axis: rainbone::Axis::X,
             color: 3,
             height: 80,
         };

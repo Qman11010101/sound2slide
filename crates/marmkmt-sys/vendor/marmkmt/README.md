@@ -10,6 +10,10 @@
 で定義された安定した C ABI に変換するライブラリです。ビルド成果物は単一の x64 Windows スタティックライブラリであり、
 ブリッジ DLL は生成されません。
 
+AIR-CRUSH の描画軸は `ex_attr` で指定します。X軸には `MG_NOTE_EX_ATTR_NONE`、Y軸には
+`MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Y`、Z軸には `MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Z` を使用します。
+Y軸とZ軸の属性は AIR-CRUSH 専用です。
+
 SDK ヘッダーは `third_party/MargretePluginSDK` Git サブモジュールとして提供されており、
 コミット `b8d0c87125e090880a75f6f0ff57a773510299a8` に固定されています。
 

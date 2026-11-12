@@ -10,6 +10,10 @@
 defined by [`include/marmkmt.h`](include/marmkmt.h). The build artifact is a single x64
 Windows static library; no bridge DLL is generated.
 
+Set the AIR-CRUSH drawing axis with `ex_attr`: use `MG_NOTE_EX_ATTR_NONE` for X,
+`MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Y` for Y, and `MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Z` for Z.
+The Y and Z attributes are accepted only for AIR-CRUSH notes.
+
 The SDK headers are provided as a `third_party/MargretePluginSDK` Git
 submodule, pinned to commit `b8d0c87125e090880a75f6f0ff57a773510299a8`.
 

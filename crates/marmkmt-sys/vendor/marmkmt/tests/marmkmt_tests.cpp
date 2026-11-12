@@ -537,6 +537,30 @@ namespace
         assert(host_api->note_set_info(note, &ni) == MG_OK);
         ni.type = 13;
         assert(host_api->note_set_info(note, &ni) == MG_ERR_INVALID_ARGUMENT);
+
+        ni.type = MG_NOTE_TYPE_AIRCRUSH;
+        ni.long_attr = MG_NOTE_LONG_ATTR_BEGIN;
+        const MgInt aircrush_axes[] = {MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Y, MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Z};
+        for (MgInt axis : aircrush_axes)
+        {
+            ni.ex_attr = axis;
+            assert(host_api->note_set_info(note, &ni) == MG_OK);
+            MgNoteInfo round_trip{};
+            assert(host_api->note_get_info(note, &round_trip) == MG_OK);
+            assert(round_trip.type == MG_NOTE_TYPE_AIRCRUSH && round_trip.ex_attr == axis);
+        }
+        ni.ex_attr = 6;
+        assert(host_api->note_set_info(note, &ni) == MG_ERR_INVALID_ARGUMENT);
+
+        ni.type = MG_NOTE_TYPE_TAP;
+        ni.long_attr = MG_NOTE_LONG_ATTR_NONE;
+        for (MgInt axis : aircrush_axes)
+        {
+            ni.ex_attr = axis;
+            assert(host_api->note_set_info(note, &ni) == MG_ERR_INVALID_ARGUMENT);
+        }
+        ni.ex_attr = MG_NOTE_EX_ATTR_NONE;
+        assert(host_api->note_set_info(note, &ni) == MG_OK);
         assert(host_api->chart_append_note(chart, note) == MG_OK);
         MgInt id{};
         assert(host_api->note_get_id(note, &id) == MG_OK && id == 42);

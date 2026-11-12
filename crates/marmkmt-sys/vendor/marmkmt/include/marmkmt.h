@@ -128,6 +128,8 @@ extern "C"
 #define MG_NOTE_EX_ATTR_INVERT 1
 #define MG_NOTE_EX_ATTR_HAS_NOTE 2
 #define MG_NOTE_EX_ATTR_EXJDG 3
+#define MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Y 4
+#define MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Z 5
 /** @} */
 
 /** @name AirCrush オプション値

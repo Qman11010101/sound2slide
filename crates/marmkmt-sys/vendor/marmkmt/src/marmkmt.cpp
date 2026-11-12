@@ -219,10 +219,12 @@ namespace
 
     bool valid_note_info(const MgNoteInfo &i)
     {
+        const bool valid_ex_attr = (i.ex_attr >= MG_NOTE_EX_ATTR_NONE && i.ex_attr <= MG_NOTE_EX_ATTR_EXJDG) ||
+                                   (i.type == MG_NOTE_TYPE_AIRCRUSH && (i.ex_attr == MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Y ||
+                                                                        i.ex_attr == MG_NOTE_EX_ATTR_AIRCRUSH_AXIS_Z));
         return i.type >= MG_NOTE_TYPE_UNKNOWN && i.type <= MG_NOTE_TYPE_CLICK &&
                i.long_attr >= MG_NOTE_LONG_ATTR_NONE && i.long_attr <= MG_NOTE_LONG_ATTR_END_NOACT &&
-               i.direction >= MG_NOTE_DIRECTION_NONE && i.direction <= MG_NOTE_DIRECTION_OUT_IN &&
-               i.ex_attr >= MG_NOTE_EX_ATTR_NONE && i.ex_attr <= MG_NOTE_EX_ATTR_EXJDG;
+               i.direction >= MG_NOTE_DIRECTION_NONE && i.direction <= MG_NOTE_DIRECTION_OUT_IN && valid_ex_attr;
     }
 
     MP_NOTEINFO to_sdk(const MgNoteInfo &i)
