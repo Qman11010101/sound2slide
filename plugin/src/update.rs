@@ -185,24 +185,39 @@ pub(crate) fn footer(ui: &mut egui::Ui, available: &Release, lang: Lang) {
     let Some(url) = available.archive_url() else {
         return;
     };
-    ui.label(format!(
-        "{} (sound2slide {})",
-        lang.pick([
-            "新しいバージョンがあります",
-            "A new version is available",
-            "有新版本可供下載",
-            "새 버전이 있습니다",
-        ]),
-        available.tag_name
-    ));
-    if ui
-        .link(lang.pick(["ダウンロード", "Download", "下載", "다운로드"]))
-        .on_hover_text(url)
-        .clicked()
-    {
-        open_in_browser(url);
-    }
-    ui.separator();
+    egui::Frame::new()
+        .fill(egui::Color32::from_rgb(20, 36, 52))
+        .stroke(egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgb(56, 128, 196),
+        ))
+        .corner_radius(egui::CornerRadius::same(5))
+        .inner_margin(egui::Margin::symmetric(8, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} (sound2slide {})",
+                    lang.pick([
+                        "新しいバージョンがあります",
+                        "A new version is available",
+                        "有新版本可供下載",
+                        "새 버전이 있습니다",
+                    ]),
+                    available.tag_name
+                ))
+                .size(11.5)
+                .color(egui::Color32::from_rgb(176, 224, 255)),
+            );
+            if ui
+                .link(lang.pick(["ダウンロード", "Download", "下載", "다운로드"]))
+                .on_hover_text(url)
+                .clicked()
+            {
+                open_in_browser(url);
+            }
+        });
+    ui.add_space(4.0);
 }
 
 pub(crate) fn show(ctx: &egui::Context, available: &Release, open: &mut bool, lang: Lang) {
@@ -211,7 +226,7 @@ pub(crate) fn show(ctx: &egui::Context, available: &Release, open: &mut bool, la
     }
     let mut close = false;
     let response = egui::Modal::new(egui::Id::new("update_available")).show(ctx, |ui| {
-        ui.set_max_width((ctx.content_rect().width() - 64.0).clamp(200.0, 420.0));
+        ui.set_max_width((ctx.content_rect().width() - 64.0).clamp(240.0, 420.0));
         ui.heading(lang.pick([
             "更新のお知らせ",
             "Update available",
@@ -225,22 +240,48 @@ pub(crate) fn show(ctx: &egui::Context, available: &Release, open: &mut bool, la
             "sound2slide 有新版本可供下載。",
             "sound2slide의 새 버전이 출시되었습니다.",
         ]));
-        ui.label(format!("sound2slide {}", available.tag_name));
-        ui.label(lang.pick([
-            "更新する場合は、Margreteを終了してからファイルを差し替えてください。",
-            "Close Margrete before replacing the plugin files to update.",
-            "更新時，請先關閉 Margrete，再替換外掛檔案。",
-            "업데이트하려면 Margrete를 종료한 후 플러그인 파일을 교체해 주세요.",
-        ]));
-        ui.add_space(8.0);
+        ui.add_space(4.0);
+        egui::Frame::new()
+            .fill(egui::Color32::from_rgb(14, 17, 25))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 50, 68)))
+            .corner_radius(egui::CornerRadius::same(4))
+            .inner_margin(egui::Margin::symmetric(8, 4))
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new(format!("sound2slide {}", available.tag_name))
+                        .strong()
+                        .color(egui::Color32::from_rgb(96, 196, 255)),
+                );
+            });
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(lang.pick([
+                "更新する場合は、Margreteを終了してからファイルを差し替えてください。",
+                "Close Margrete before replacing the plugin files to update.",
+                "更新時，請先關閉 Margrete，再替換外掛檔案。",
+                "업데이트하려면 Margrete를 종료한 후 플러그인 파일을 교체해 주세요.",
+            ]))
+            .color(egui::Color32::from_rgb(148, 158, 178)),
+        );
+        ui.add_space(10.0);
         ui.horizontal(|ui| {
             if ui
-                .button(lang.pick([
-                    "リリースページを開く",
-                    "Open release page",
-                    "開啟版本發布頁面",
-                    "릴리스 페이지 열기",
-                ]))
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new(lang.pick([
+                            "リリースページを開く",
+                            "Open release page",
+                            "開啟版本發布頁面",
+                            "릴리스 페이지 열기",
+                        ]))
+                        .strong(),
+                    )
+                    .fill(egui::Color32::from_rgb(36, 118, 196))
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        egui::Color32::from_rgb(96, 196, 255),
+                    )),
+                )
                 .clicked()
             {
                 open_in_browser(RELEASES_URL);
