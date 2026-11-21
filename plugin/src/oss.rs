@@ -80,24 +80,29 @@ pub(crate) fn show(ctx: &egui::Context, open: &mut bool, lang: Lang) {
                 "sound2slide 直接使用的主要程式庫。",
                 "sound2slide가 직접 사용하는 주요 라이브러리입니다.",
             ]));
-            ui.label(lang.pick([
-                "OR は、いずれかのライセンスを選択できることを示します。",
-                "OR means that either license may be chosen.",
-                "OR 表示可任選其中一種授權。",
-                "OR은 어느 쪽 라이선스든 선택할 수 있음을 뜻합니다.",
-            ]));
+            ui.label(
+                egui::RichText::new(lang.pick([
+                    "OR は、いずれかのライセンスを選択できることを示します。",
+                    "OR means that either license may be chosen.",
+                    "OR 表示可任選其中一種授權。",
+                    "OR은 어느 쪽 라이선스든 선택할 수 있음을 뜻합니다.",
+                ]))
+                .color(egui::Color32::from_rgb(148, 158, 178)),
+            );
+            ui.add_space(4.0);
             ui.separator();
+            ui.add_space(4.0);
             egui::Grid::new("open_source_libraries_table")
                 .striped(true)
-                .spacing([16.0, 8.0])
+                .spacing([20.0, 8.0])
                 .show(ui, |ui| {
                     ui.strong(lang.pick(["ライブラリ", "Library", "程式庫", "라이브러리"]));
                     ui.strong(lang.pick(["バージョン", "Version", "版本", "버전"]));
                     ui.strong(lang.pick(["ライセンス", "License", "授權", "라이선스"]));
                     ui.end_row();
                     for library in LIBRARIES {
-                        ui.label(library.name);
-                        ui.label(library.version);
+                        ui.label(egui::RichText::new(library.name).strong());
+                        ui.label(egui::RichText::new(library.version).monospace());
                         ui.label(library.license);
                         ui.end_row();
                     }

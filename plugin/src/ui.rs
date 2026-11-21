@@ -56,8 +56,8 @@ pub(crate) fn open(
             .with_title("sound2slide")
             // eframe targets the active HWND, which can still belong to Margrete.
             .with_icon(egui::IconData::default())
-            .with_inner_size([640.0, 780.0])
-            .with_min_inner_size([560.0, 480.0]),
+            .with_inner_size([780.0, 820.0])
+            .with_min_inner_size([620.0, 520.0]),
         centered: true,
         persist_window: false,
         run_and_return: true,
@@ -68,7 +68,7 @@ pub(crate) fn open(
         options,
         Box::new(move |creation| {
             host.attach(creation).map_err(std::io::Error::other)?;
-            creation.egui_ctx.set_visuals(egui::Visuals::dark());
+            apply_theme(&creation.egui_ctx);
             let mut app = Sound2SlideApp::new(start_tick, app_output, lookup_bpm, lookup_signature);
             app.host_extended_field = chart_uses_extended_field;
             app.select_detected_field();
@@ -82,6 +82,120 @@ pub(crate) fn open(
     .map_err(|error| error.to_string())?;
     let mut guard = output.lock().unwrap_or_else(|error| error.into_inner());
     Ok(guard.take())
+}
+
+const BG_PANEL: egui::Color32 = egui::Color32::from_rgb(18, 21, 30);
+const BG_CARD: egui::Color32 = egui::Color32::from_rgb(25, 29, 41);
+const BG_INPUT: egui::Color32 = egui::Color32::from_rgb(14, 17, 25);
+const BORDER_SUBTLE: egui::Color32 = egui::Color32::from_rgb(43, 50, 68);
+const TEXT_PRIMARY: egui::Color32 = egui::Color32::from_rgb(232, 237, 246);
+const TEXT_MUTED: egui::Color32 = egui::Color32::from_rgb(148, 158, 178);
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(46, 152, 240);
+const ACCENT_BRIGHT: egui::Color32 = egui::Color32::from_rgb(96, 196, 255);
+const WARN_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 184, 77);
+const WARN_BG: egui::Color32 = egui::Color32::from_rgba_premultiplied(44, 34, 22, 255);
+const OK_COLOR: egui::Color32 = egui::Color32::from_rgb(88, 214, 168);
+const OK_BG: egui::Color32 = egui::Color32::from_rgba_premultiplied(20, 38, 36, 255);
+
+fn apply_theme(ctx: &egui::Context) {
+    let mut visuals = egui::Visuals::dark();
+    visuals.panel_fill = BG_PANEL;
+    visuals.window_fill = BG_CARD;
+    visuals.extreme_bg_color = BG_INPUT;
+    visuals.faint_bg_color = egui::Color32::from_rgb(22, 26, 37);
+    visuals.override_text_color = Some(TEXT_PRIMARY);
+    visuals.window_corner_radius = egui::CornerRadius::same(8);
+    visuals.menu_corner_radius = egui::CornerRadius::same(6);
+    visuals.window_stroke = egui::Stroke::new(1.0, BORDER_SUBTLE);
+
+    visuals.widgets.noninteractive.bg_fill = BG_PANEL;
+    visuals.widgets.noninteractive.weak_bg_fill = BG_CARD;
+    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, BORDER_SUBTLE);
+    visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, TEXT_PRIMARY);
+    visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(5);
+
+    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(33, 39, 54);
+    visuals.widgets.inactive.weak_bg_fill = egui::Color32::from_rgb(31, 37, 52);
+    visuals.widgets.inactive.bg_stroke =
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(52, 60, 82));
+    visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, TEXT_PRIMARY);
+    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(5);
+
+    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(44, 53, 74);
+    visuals.widgets.hovered.weak_bg_fill = egui::Color32::from_rgb(44, 53, 74);
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, ACCENT_BRIGHT);
+    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.2, egui::Color32::WHITE);
+    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(5);
+
+    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(52, 64, 90);
+    visuals.widgets.active.weak_bg_fill = egui::Color32::from_rgb(52, 64, 90);
+    visuals.widgets.active.bg_stroke = egui::Stroke::new(1.2, ACCENT_BRIGHT);
+    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5, egui::Color32::WHITE);
+    visuals.widgets.active.corner_radius = egui::CornerRadius::same(5);
+
+    visuals.widgets.open.bg_fill = egui::Color32::from_rgb(39, 47, 66);
+    visuals.widgets.open.weak_bg_fill = egui::Color32::from_rgb(39, 47, 66);
+    visuals.widgets.open.bg_stroke = egui::Stroke::new(1.0, ACCENT);
+    visuals.widgets.open.corner_radius = egui::CornerRadius::same(5);
+
+    visuals.selection.bg_fill = egui::Color32::from_rgb(31, 86, 138);
+    visuals.selection.stroke = egui::Stroke::new(1.0, ACCENT_BRIGHT);
+    visuals.hyperlink_color = ACCENT_BRIGHT;
+    ctx.set_theme(egui::Theme::Dark);
+    ctx.style_mut_of(egui::Theme::Dark, |style| {
+        style.visuals = visuals;
+        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        style.spacing.button_padding = egui::vec2(10.0, 5.0);
+        style.spacing.combo_height = 240.0;
+        style.spacing.interact_size.y = 24.0;
+    });
+}
+
+fn section_card(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::new()
+        .fill(BG_CARD)
+        .stroke(egui::Stroke::new(1.0, BORDER_SUBTLE))
+        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(egui::Margin::symmetric(10, 9))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add_contents(ui);
+        });
+}
+
+fn section_heading(ui: &mut egui::Ui, text: &str) {
+    ui.label(
+        egui::RichText::new(text)
+            .size(11.5)
+            .strong()
+            .color(ACCENT_BRIGHT),
+    );
+}
+
+fn primary_button(text: impl Into<egui::WidgetText>, enabled: bool) -> egui::Button<'static> {
+    let mut button = egui::Button::new(text).corner_radius(egui::CornerRadius::same(5));
+    if enabled {
+        button = button
+            .fill(egui::Color32::from_rgb(36, 118, 196))
+            .stroke(egui::Stroke::new(1.0, ACCENT_BRIGHT));
+    }
+    button
+}
+
+fn segmented_choice(ui: &mut egui::Ui, selected: bool, text: &str, width: f32) -> egui::Response {
+    let mut button = egui::Button::new(egui::RichText::new(text).color(if selected {
+        egui::Color32::WHITE
+    } else {
+        TEXT_PRIMARY
+    }))
+    .min_size(egui::vec2(width, 24.0))
+    .corner_radius(egui::CornerRadius::same(4));
+    if selected {
+        button = button
+            .fill(egui::Color32::from_rgb(34, 96, 156))
+            .stroke(egui::Stroke::new(1.0, ACCENT_BRIGHT));
+    }
+    ui.add(button)
 }
 
 #[derive(Clone, Copy)]
@@ -275,69 +389,132 @@ impl<'a> Sound2SlideApp<'a> {
         }
         audit.advance(&self.generated.slides, self.lookup_bpm);
         let lang = self.lang;
-        let color = egui::Color32::from_rgb(255, 180, 80);
-        if !audit.complete {
-            ui.label(lang.pick([
-                "48レーン校閲中…",
-                "Checking the 48-lane field…",
-                "正在檢查48軌…",
-                "48레인 검사 중…",
-            ]));
-            ui.ctx().request_repaint();
-        }
-        if let Some(error) = &audit.error {
-            ui.colored_label(
-                color,
-                lang.pick([
-                    format!("校閲を完了できませんでした：{}", error.text(lang)),
-                    format!("Could not complete the check: {}", error.text(lang)),
-                    format!("無法完成檢查：{}", error.text(lang)),
-                    format!("검사를 완료하지 못했습니다: {}", error.text(lang)),
-                ]),
-            );
-        }
-        if audit.count == 0 {
-            if audit.complete && audit.error.is_none() {
-                ui.label(lang.pick([
-                    "48レーン校閲：警告なし",
-                    "48-lane check: no warnings",
-                    "48軌檢查：無警告",
-                    "48레인 검사: 경고 없음",
-                ]));
-            }
-            return;
-        }
-        ui.colored_label(
-            color,
-            lang.pick([
-                format!("48レーン校閲：警告 {} 件", audit.count),
-                format!("48-lane check: {} warnings", audit.count),
-                format!("48軌檢查：{}項警告", audit.count),
-                format!("48레인 검사: 경고 {}개", audit.count),
-            ]),
-        );
-        ui.label(lang.pick([
-            "Margreteの譜面出力で弾かれる可能性があります。移動範囲を狭めるか、始点・終点を中央に寄せてください。警告があっても追加できます。",
-            "Margrete may reject chart export. Reduce the movement range or move the start/end toward the center. You can still add these notes.",
-            "Margrete可能拒絕匯出。請縮小移動範圍，或將起點、終點移向中央。有警告時仍可加入音符。",
-            "Margrete에서 채보 내보내기가 거부될 수 있습니다. 이동 범위를 줄이거나 시작점·끝점을 중앙으로 옮겨 주세요. 경고가 있어도 추가할 수 있습니다.",
-        ]));
-        ui.collapsing(lang.pick(["警告の詳細", "Warning details", "警告詳情", "경고 상세"]), |ui| {
-            ui.label(lang.pick([
-                "位置は譜面の絶対tickです。時間の境界は未確定のため、途中90 ms・終端40 msから警告します（AIRなし）。",
-                "Positions are absolute chart ticks. Boundaries are unverified, so warnings start at 90 ms mid-slide and 40 ms at the end (without AIR).",
-                "位置為譜面的絕對tick。邊界尚未確認，因此中途90 ms、末端40 ms起即顯示警告（無AIR）。",
-                "위치는 채보의 절대 tick입니다. 경계가 미확정이므로 중간 90 ms·끝 40 ms부터 경고합니다 (AIR 없음).",
-            ]));
-            egui::ScrollArea::vertical().id_salt("audit_details").max_height(180.0).show(ui, |ui| {
-                for warning in &audit.warnings {
-                    ui.label(format!("#{} / tick {}: {}", warning.slide + 1, warning.tick, warning.reason.text(lang)));
+        let has_issue = audit.error.is_some() || audit.count > 0;
+        let (fill, stroke) = if has_issue {
+            (
+                WARN_BG,
+                egui::Stroke::new(1.0, WARN_COLOR.gamma_multiply(0.55)),
+            )
+        } else if audit.complete {
+            (OK_BG, egui::Stroke::new(1.0, OK_COLOR.gamma_multiply(0.45)))
+        } else {
+            (BG_CARD, egui::Stroke::new(1.0, BORDER_SUBTLE))
+        };
+        egui::Frame::new()
+            .fill(fill)
+            .stroke(stroke)
+            .corner_radius(egui::CornerRadius::same(6))
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                if !audit.complete {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(lang.pick([
+                            "48レーン校閲中…",
+                            "Checking the 48-lane field…",
+                            "正在檢查48軌…",
+                            "48레인 검사 중…",
+                        ]));
+                    });
+                    ui.ctx().request_repaint();
                 }
-                if audit.count > audit.warnings.len() {
-                    ui.label(lang.pick(["詳細は先頭100件まで表示します。", "Showing the first 100 warnings.", "僅顯示前100項警告。", "처음 100개 경고를 표시합니다."]));
+                if let Some(error) = &audit.error {
+                    ui.colored_label(
+                        WARN_COLOR,
+                        lang.pick([
+                            format!("校閲を完了できませんでした：{}", error.text(lang)),
+                            format!("Could not complete the check: {}", error.text(lang)),
+                            format!("無法完成檢查：{}", error.text(lang)),
+                            format!("검사를 완료하지 못했습니다: {}", error.text(lang)),
+                        ]),
+                    );
                 }
+                if audit.count == 0 {
+                    if audit.complete && audit.error.is_none() {
+                        ui.label(
+                            egui::RichText::new(lang.pick([
+                                "48レーン校閲：警告なし",
+                                "48-lane check: no warnings",
+                                "48軌檢查：無警告",
+                                "48레인 검사: 경고 없음",
+                            ]))
+                            .color(OK_COLOR)
+                            .strong(),
+                        );
+                    }
+                    return;
+                }
+                ui.label(
+                    egui::RichText::new(lang.pick([
+                        format!("48レーン校閲：警告 {} 件", audit.count),
+                        format!("48-lane check: {} warnings", audit.count),
+                        format!("48軌檢查：{}項警告", audit.count),
+                        format!("48레인 검사: 경고 {}개", audit.count),
+                    ]))
+                    .color(WARN_COLOR)
+                    .strong(),
+                );
+                ui.label(
+                    egui::RichText::new(lang.pick([
+                        "Margreteの譜面出力で弾かれる可能性があります。移動範囲を狭めるか、始点・終点を中央に寄せてください。警告があっても追加できます。",
+                        "Margrete may reject chart export. Reduce the movement range or move the start/end toward the center. You can still add these notes.",
+                        "Margrete可能拒絕匯出。請縮小移動範圍，或將起點、終點移向中央。有警告時仍可加入音符。",
+                        "Margrete에서 채보 내보내기가 거부될 수 있습니다. 이동 범위를 줄이거나 시작점·끝점을 중앙으로 옮겨 주세요. 경고가 있어도 추가할 수 있습니다.",
+                    ]))
+                    .size(11.5)
+                    .color(TEXT_MUTED),
+                );
+                ui.collapsing(
+                    lang.pick(["警告の詳細", "Warning details", "警告詳情", "경고 상세"]),
+                    |ui| {
+                        ui.label(
+                            egui::RichText::new(lang.pick([
+                                "位置は譜面の絶対tickです。時間の境界は未確定のため、途中90 ms・終端40 msから警告します（AIRなし）。",
+                                "Positions are absolute chart ticks. Boundaries are unverified, so warnings start at 90 ms mid-slide and 40 ms at the end (without AIR).",
+                                "位置為譜面的絕對tick。邊界尚未確認，因此中途90 ms、末端40 ms起即顯示警告（無AIR）。",
+                                "위치는 채보의 절대 tick입니다. 경계가 미확정이므로 중간 90 ms·끝 40 ms부터 경고합니다 (AIR 없음).",
+                            ]))
+                            .size(11.0)
+                            .color(TEXT_MUTED),
+                        );
+                        egui::Frame::new()
+                            .fill(BG_INPUT)
+                            .corner_radius(egui::CornerRadius::same(4))
+                            .inner_margin(egui::Margin::symmetric(6, 4))
+                            .show(ui, |ui| {
+                                egui::ScrollArea::vertical()
+                                    .id_salt("audit_details")
+                                    .max_height(160.0)
+                                    .show(ui, |ui| {
+                                        for warning in &audit.warnings {
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "#{} / tick {}: {}",
+                                                    warning.slide + 1,
+                                                    warning.tick,
+                                                    warning.reason.text(lang)
+                                                ))
+                                                .size(11.5),
+                                            );
+                                        }
+                                        if audit.count > audit.warnings.len() {
+                                            ui.label(
+                                                egui::RichText::new(lang.pick([
+                                                    "詳細は先頭100件まで表示します。",
+                                                    "Showing the first 100 warnings.",
+                                                    "僅顯示前100項警告。",
+                                                    "처음 100개 경고를 표시합니다.",
+                                                ]))
+                                                .size(11.0)
+                                                .color(TEXT_MUTED),
+                                            );
+                                        }
+                                    });
+                            });
+                    },
+                );
             });
-        });
     }
 
     fn open_file(&mut self, parent: &eframe::Frame) {
@@ -490,26 +667,40 @@ impl<'a> Sound2SlideApp<'a> {
         };
         let mut action = None;
         egui::Modal::new(egui::Id::new("mgxc_offset_selection")).show(ctx, |ui| {
-            ui.set_max_width((ctx.content_rect().width() - 64.0).clamp(200.0, 440.0));
-            ui.label(lang.pick([
-                "どの譜面ファイルを元にオフセットを設定しますか？",
-                "Which chart file should the offset be taken from?",
-                "要依據哪個譜面檔案設定偏移？",
-                "어느 채보 파일을 기준으로 오프셋을 설정할까요?",
-            ]));
+            ui.set_max_width((ctx.content_rect().width() - 64.0).clamp(240.0, 440.0));
+            ui.label(
+                egui::RichText::new(lang.pick([
+                    "どの譜面ファイルを元にオフセットを設定しますか？",
+                    "Which chart file should the offset be taken from?",
+                    "要依據哪個譜面檔案設定偏移？",
+                    "어느 채보 파일을 기준으로 오프셋을 설정할까요?",
+                ]))
+                .strong(),
+            );
             ui.add_space(8.0);
-            egui::ScrollArea::vertical()
-                .max_height((ctx.content_rect().height() * 0.5).min(300.0))
+            egui::Frame::new()
+                .fill(BG_INPUT)
+                .stroke(egui::Stroke::new(1.0, BORDER_SUBTLE))
+                .corner_radius(egui::CornerRadius::same(5))
+                .inner_margin(egui::Margin::symmetric(8, 6))
                 .show(ui, |ui| {
-                    for (index, file) in selection.files.iter().enumerate() {
-                        let name = file.file_name().unwrap_or_default().to_string_lossy();
-                        ui.radio_value(&mut selection.selected, index, name.as_ref());
-                    }
+                    ui.set_width(ui.available_width());
+                    egui::ScrollArea::vertical()
+                        .max_height((ctx.content_rect().height() * 0.5).min(300.0))
+                        .show(ui, |ui| {
+                            for (index, file) in selection.files.iter().enumerate() {
+                                let name = file.file_name().unwrap_or_default().to_string_lossy();
+                                ui.radio_value(&mut selection.selected, index, name.as_ref());
+                            }
+                        });
                 });
-            ui.add_space(8.0);
+            ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if ui
-                    .button(lang.pick(["選択する", "Select", "選擇", "선택"]))
+                    .add(primary_button(
+                        lang.pick(["選択する", "Select", "選擇", "선택"]),
+                        true,
+                    ))
                     .clicked()
                 {
                     action = Some(true);
@@ -566,254 +757,8 @@ impl<'a> Sound2SlideApp<'a> {
         }
     }
 
-    fn controls(&mut self, ui: &mut egui::Ui, parent: &eframe::Frame) {
-        ui.horizontal(|ui| {
-            ui.heading("sound2slide");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                self.language_selector(ui);
-            });
-        });
-        let lang = self.lang;
-        ui.label(format!(
-            "{} {}",
-            lang.pick(["開始 tick:", "Start tick:", "起始 tick：", "시작 tick:"]),
-            self.start_tick
-        ));
-        ui.label(lang.pick([
-            "このウィンドウを閉じるまで Margrete は待機します。",
-            "Margrete waits until this window is closed.",
-            "關閉此視窗前 Margrete 會保持等待。",
-            "이 창을 닫을 때까지 Margrete는 대기합니다.",
-        ]));
-        if ui
-            .add_enabled(
-                self.position_scan.is_none(),
-                egui::Button::new(lang.pick([
-                    "音声を開く",
-                    "Open audio",
-                    "開啟音訊",
-                    "오디오 열기",
-                ])),
-            )
-            .clicked()
-        {
-            self.open_file(parent);
-        }
-        if !self.path.is_empty() {
-            ui.add(egui::Label::new(&self.path).truncate());
-        }
-        ui.label(self.status.text(lang));
-        if self.position_scan.is_some() {
-            ui.label(lang.pick([
-                "音声の開始位置を計算中…",
-                "Calculating the audio start position…",
-                "正在計算音訊起始位置…",
-                "오디오 시작 위치를 계산하는 중…",
-            ]));
-            ui.ctx().request_repaint();
-            return;
-        }
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.label("BPM");
-            ui.add(
-                egui::DragValue::new(&mut self.settings.bpm)
-                    .range(1.0..=512.0)
-                    .clamp_existing_to_range(false)
-                    .speed(1.0),
-            );
-            if ui
-                .button(lang.pick([
-                    "譜面から取得",
-                    "Get from chart",
-                    "從譜面取得",
-                    "채보에서 가져오기",
-                ]))
-                .clicked()
-            {
-                self.take_chart_timing();
-            }
-        });
-        if !self.bpm_note.is_empty() {
-            let notes: Vec<String> = self.bpm_note.iter().map(|note| note.text(lang)).collect();
-            ui.label(notes.join(" / "));
-        }
-        ui.horizontal(|ui| {
-            ui.label(lang.pick(["拍子", "Time signature", "拍號", "박자"]));
-            ui.add(
-                egui::DragValue::new(&mut self.settings.time_signature[0])
-                    .range(1..=16)
-                    .speed(1.0),
-            );
-            ui.label("/");
-            ui.add(
-                egui::DragValue::new(&mut self.settings.time_signature[1])
-                    .range(1..=480)
-                    .speed(1.0),
-            );
-        });
-        if let Some(audio) = &self.audio {
-            let duration = audio.duration_secs();
-            let seconds = lang.pick(["秒", "s", "秒", "초"]);
-            ui.label(lang.pick(["取り込む範囲", "Import range", "匯入範圍", "가져올 범위"]));
-            ui.horizontal(|ui| {
-                ui.label(lang.pick(["始点", "Start", "起點", "시작점"]));
-                ui.add(
-                    egui::DragValue::new(&mut self.settings.offset_sec)
-                        .range(-60.0..=duration)
-                        .clamp_existing_to_range(false)
-                        .speed(0.01)
-                        .max_decimals(3),
-                );
-                ui.label(seconds);
-            });
-            let remaining = (duration - self.settings.offset_sec).max(0.0);
-            self.settings.length_sec = self.settings.length_sec.min(remaining);
-            ui.horizontal(|ui| {
-                ui.label(lang.pick(["長さ", "Length", "長度", "길이"]));
-                ui.add(
-                    egui::DragValue::new(&mut self.settings.length_sec)
-                        .range(remaining.min(0.05)..=remaining)
-                        .speed(0.01)
-                        .max_decimals(3),
-                );
-                ui.label(seconds);
-            });
-        }
-        self.settings.quantize_ticks = self.settings.quantize_ticks.clamp(1, 1920);
-        let selected = QUANTIZE
-            .iter()
-            .find(|(ticks, _)| *ticks == self.settings.quantize_ticks)
-            .map(|(_, name)| (*name).to_owned())
-            .unwrap_or_else(|| format!("{} tick", self.settings.quantize_ticks));
-        egui::ComboBox::new(
-            "quantize",
-            lang.pick(["量子化", "Quantize", "量化", "퀀타이즈"]),
-        )
-        .selected_text(selected)
-        .show_ui(ui, |ui| {
-            for (ticks, name) in QUANTIZE {
-                ui.selectable_value(&mut self.settings.quantize_ticks, *ticks, *name);
-            }
-        });
-        ui.separator();
-        self.field_controls(ui);
-        self.output_controls(ui);
-        let fine_rainbone = self.fine_rainbone();
-        if !fine_rainbone {
-            ui.label(lang.pick([
-                "スライドの種類",
-                "Slide type",
-                "Slide 類型",
-                "슬라이드 종류",
-            ]));
-        }
-        ui.horizontal(|ui| {
-            if fine_rainbone {
-                return;
-            }
-            ui.radio_value(
-                &mut self.settings.symmetric_width,
-                false,
-                lang.pick(["普通の波形", "Normal waveform", "一般波形", "일반 파형"]),
-            );
-            ui.radio_value(
-                &mut self.settings.symmetric_width,
-                true,
-                lang.pick(["左右対称", "Symmetric", "左右對稱", "좌우 대칭"]),
-            );
-        });
-        // Fine reproduction picks widths 1 and 2 itself, replacing the slide type and the width.
-        if fine_rainbone || !self.settings.symmetric_width {
-            if !fine_rainbone {
-                ui.add(
-                    egui::Slider::new(&mut self.settings.width, 1..=16)
-                        .text(lang.pick(["幅", "Width", "寬度", "폭"])),
-                );
-            }
-            ui.checkbox(
-                &mut self.settings.zigzag,
-                lang.pick([
-                    "制御点を左右均等にする",
-                    "Balance control points left and right",
-                    "讓控制點左右均等",
-                    "제어점을 좌우 균등하게",
-                ]),
-            );
-            ui.checkbox(
-                &mut self.settings.center_ends,
-                lang.pick([
-                    "始点と終点を中央にする",
-                    "Center the start and end",
-                    "起點與終點置中",
-                    "시작점과 끝점을 가운데로",
-                ]),
-            );
-        }
-        ui.add(
-            egui::Slider::new(&mut self.settings.silence_threshold, 0.0..=0.5).text(lang.pick([
-                "無音しきい値",
-                "Silence threshold",
-                "靜音閾值",
-                "무음 임계값",
-            ])),
-        );
-        ui.add(
-            egui::Slider::new(&mut self.settings.smooth, 0..=8).text(lang.pick([
-                "平滑化",
-                "Smoothing",
-                "平滑化",
-                "평활화",
-            ])),
-        );
-        ui.checkbox(
-            &mut self.settings.remove_silent_points,
-            lang.pick([
-                "無音部分の制御点・中継点をなくす",
-                "Remove control and step points in silent parts",
-                "移除靜音部分的控制點與中繼點",
-                "무음 구간의 제어점·중계점 없애기",
-            ]),
-        );
-        if !self.settings.symmetric_width {
-            self.settings.max_width = self.settings.max_width.max(self.settings.width);
-        }
-        let maximum_span =
-            if self.settings.extended_field && (!self.settings.symmetric_width || fine_rainbone) {
-                48
-            } else {
-                16
-            };
-        ui.add(
-            egui::Slider::new(&mut self.settings.max_width, 2..=maximum_span)
-                .text(lang.pick(["最大幅", "Max width", "最大寬度", "최대 폭"])),
-        )
-        .on_hover_text(lang.pick([
-            "波形全体の最大幅。普通の波形ではノート幅以上になります。",
-            "Maximum width of the whole waveform. A normal waveform is at least as wide as the note width.",
-            "整體波形的最大寬度。一般波形時不會小於音符寬度。",
-            "파형 전체의 최대 폭입니다. 일반 파형에서는 노트 폭 이상이 됩니다.",
-        ]));
-        if !self.settings.symmetric_width && self.settings.max_width < self.settings.width {
-            self.settings.max_width = self.settings.width;
-            ui.ctx().request_repaint();
-        }
-        if !self.rainbone {
-            ui.checkbox(
-                &mut self.transparent_steps,
-                lang.pick([
-                    "中継点を透明にする（節を置かない）",
-                    "Make step points invisible (no joints)",
-                    "中繼點設為透明（不放置節點）",
-                    "중계점을 투명하게 (마디를 두지 않음)",
-                ]),
-            );
-        }
-        ui.separator();
-        self.refresh();
-        self.audit_warnings(ui);
-        let notes: usize = self
-            .generated
+    fn note_count(&self) -> usize {
+        self.generated
             .slides
             .iter()
             .map(|slide| {
@@ -825,51 +770,470 @@ impl<'a> Sound2SlideApp<'a> {
                     slide.points.len()
                 }
             })
-            .sum();
-        ui.label(lang.pick([
-            format!("ノート {notes} 個"),
-            format!("{notes} notes"),
-            format!("{notes} 個音符"),
-            format!("노트 {notes}개"),
-        ]));
-        if self.generated.truncated {
-            ui.colored_label(
-                egui::Color32::from_rgb(255, 180, 80),
-                lang.pick([
-                    "点数上限に達したため、後ろを切り捨てました。量子化を粗くするか長さを短くしてください。",
-                    "The point limit was reached, so the end was cut off. Use a coarser quantize or a shorter length.",
-                    "已達點數上限，後段已被截斷。請將量化調粗或縮短長度。",
-                    "점 개수 상한에 도달하여 뒷부분을 잘라냈습니다. 퀀타이즈를 거칠게 하거나 길이를 줄여 주세요.",
-                ]),
+            .sum()
+    }
+
+    fn controls_header(&mut self, ui: &mut egui::Ui) {
+        let lang = self.lang;
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("sound2slide")
+                    .size(18.0)
+                    .strong()
+                    .color(egui::Color32::WHITE),
             );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                self.language_selector(ui);
+            });
+        });
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            egui::Frame::new()
+                .fill(BG_INPUT)
+                .stroke(egui::Stroke::new(1.0, BORDER_SUBTLE))
+                .corner_radius(egui::CornerRadius::same(4))
+                .inner_margin(egui::Margin::symmetric(6, 2))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} {}",
+                            lang.pick(["開始 tick:", "Start tick:", "起始 tick：", "시작 tick:"]),
+                            self.start_tick
+                        ))
+                        .size(11.5)
+                        .color(ACCENT_BRIGHT),
+                    );
+                });
+        });
+        ui.label(
+            egui::RichText::new(lang.pick([
+                "このウィンドウを閉じるまで Margrete は待機します。",
+                "Margrete waits until this window is closed.",
+                "關閉此視窗前 Margrete 會保持等待。",
+                "이 창을 닫을 때까지 Margrete는 대기합니다.",
+            ]))
+            .size(11.0)
+            .color(TEXT_MUTED),
+        );
+        ui.add_space(2.0);
+    }
+
+    fn controls_footer(&mut self, ui: &mut egui::Ui) {
+        let lang = self.lang;
+        let notes = self.note_count();
+        ui.add_space(4.0);
+        if self.generated.truncated {
+            egui::Frame::new()
+                .fill(WARN_BG)
+                .stroke(egui::Stroke::new(1.0, WARN_COLOR.gamma_multiply(0.5)))
+                .corner_radius(egui::CornerRadius::same(5))
+                .inner_margin(egui::Margin::symmetric(8, 5))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(
+                        egui::RichText::new(lang.pick([
+                            "点数上限に達したため、後ろを切り捨てました。量子化を粗くするか長さを短くしてください。",
+                            "The point limit was reached, so the end was cut off. Use a coarser quantize or a shorter length.",
+                            "已達點數上限，後段已被截斷。請將量化調粗或縮短長度。",
+                            "점 개수 상한에 도달하여 뒷부분을 잘라냈습니다. 퀀타이즈를 거칠게 하거나 길이를 줄여 주세요.",
+                        ]))
+                        .size(11.5)
+                        .color(WARN_COLOR),
+                    );
+                });
+            ui.add_space(4.0);
         }
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(lang.pick([
+                    format!("ノート {notes} 個"),
+                    format!("{notes} notes"),
+                    format!("{notes} 個音符"),
+                    format!("노트 {notes}개"),
+                ]))
+                .size(12.0)
+                .color(if notes > 0 { TEXT_PRIMARY } else { TEXT_MUTED }),
+            );
+        });
+        ui.add_space(2.0);
+        let can_commit = self.position_scan.is_none() && notes > 0;
         let label = lang.pick([
             format!("譜面に追加（{notes} ノート）"),
             format!("Add to chart ({notes} notes)"),
             format!("加入譜面（{notes} 個音符）"),
             format!("채보에 추가 (노트 {notes}개)"),
         ]);
+        let close_width = 76.0;
+        let spacing = ui.spacing().item_spacing.x;
+        let primary_width = (ui.available_width() - close_width - spacing).max(120.0);
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    can_commit,
+                    primary_button(egui::RichText::new(label).strong(), can_commit)
+                        .min_size(egui::vec2(primary_width, 30.0)),
+                )
+                .clicked()
+            {
+                let commit = Commit {
+                    slides: self.generated.slides.clone(),
+                    transparent_steps: self.transparent_steps,
+                    output: self.output(),
+                };
+                *self
+                    .output
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = Some(commit);
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            if ui
+                .add(
+                    egui::Button::new(lang.pick(["閉じる", "Close", "關閉", "닫기"]))
+                        .min_size(egui::vec2(close_width, 30.0)),
+                )
+                .clicked()
+            {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        });
+        ui.add_space(4.0);
+        ui.separator();
+        if let Some(available) = &self.update_available {
+            update::footer(ui, available, self.lang);
+        }
         if ui
-            .add_enabled(notes > 0, egui::Button::new(label))
+            .add(
+                egui::Button::new(
+                    egui::RichText::new(crate::oss::title(self.lang))
+                        .size(11.5)
+                        .color(TEXT_MUTED),
+                )
+                .frame(false),
+            )
             .clicked()
         {
-            let commit = Commit {
-                slides: self.generated.slides.clone(),
-                transparent_steps: self.transparent_steps,
-                output: self.output(),
+            self.show_open_source_libraries = true;
+        }
+    }
+
+    fn controls(&mut self, ui: &mut egui::Ui, parent: &eframe::Frame) {
+        let lang = self.lang;
+        ui.add_space(4.0);
+        section_card(ui, |ui| {
+            let no_audio = self.audio.is_none();
+            let open_label = lang.pick(["音声を開く", "Open audio", "開啟音訊", "오디오 열기"]);
+            let open_button = if no_audio {
+                primary_button(egui::RichText::new(open_label).strong(), true)
+            } else {
+                egui::Button::new(open_label)
+            }
+            .min_size(egui::vec2(ui.available_width(), 28.0));
+            if ui
+                .add_enabled(self.position_scan.is_none(), open_button)
+                .clicked()
+            {
+                self.open_file(parent);
+            }
+            if !self.path.is_empty() {
+                let display_name = std::path::Path::new(&self.path)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| self.path.clone());
+                ui.add(egui::Label::new(egui::RichText::new(display_name).strong()).truncate())
+                    .on_hover_text(&self.path);
+            }
+            let status_color = match &self.status {
+                Msg::OpenAudioPrompt | Msg::AudioInfo { .. } => TEXT_MUTED,
+                _ => egui::Color32::from_rgb(255, 118, 118),
             };
-            *self
-                .output
-                .lock()
-                .unwrap_or_else(|error| error.into_inner()) = Some(commit);
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            ui.label(
+                egui::RichText::new(self.status.text(lang))
+                    .size(11.5)
+                    .color(status_color),
+            );
+            if self.position_scan.is_some() {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(lang.pick([
+                        "音声の開始位置を計算中…",
+                        "Calculating the audio start position…",
+                        "正在計算音訊起始位置…",
+                        "오디오 시작 위치를 계산하는 중…",
+                    ]));
+                });
+                ui.ctx().request_repaint();
+                return;
+            }
+            if let Some(audio) = &self.audio {
+                let duration = audio.duration_secs();
+                let seconds_suffix = lang.pick([" 秒", " s", " 秒", "초"]);
+                ui.add_space(2.0);
+                ui.separator();
+                section_heading(
+                    ui,
+                    lang.pick(["取り込む範囲", "Import range", "匯入範圍", "가져올 범위"]),
+                );
+                egui::Grid::new("import_range_grid")
+                    .num_columns(2)
+                    .spacing([10.0, 6.0])
+                    .show(ui, |ui| {
+                        ui.label(lang.pick(["始点", "Start", "起點", "시작점"]));
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings.offset_sec)
+                                .range(-60.0..=duration)
+                                .clamp_existing_to_range(false)
+                                .speed(0.01)
+                                .max_decimals(3)
+                                .suffix(seconds_suffix),
+                        );
+                        ui.end_row();
+                        let remaining = (duration - self.settings.offset_sec).max(0.0);
+                        self.settings.length_sec = self.settings.length_sec.min(remaining);
+                        ui.label(lang.pick(["長さ", "Length", "長度", "길이"]));
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings.length_sec)
+                                .range(remaining.min(0.05)..=remaining)
+                                .speed(0.01)
+                                .max_decimals(3)
+                                .suffix(seconds_suffix),
+                        );
+                        ui.end_row();
+                    });
+            }
+        });
+        if self.position_scan.is_some() {
+            return;
         }
-        if ui
-            .button(lang.pick(["閉じる", "Close", "關閉", "닫기"]))
-            .clicked()
-        {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        ui.add_space(6.0);
+        section_card(ui, |ui| {
+            egui::Grid::new("timing_grid")
+                .num_columns(2)
+                .spacing([10.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("BPM");
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings.bpm)
+                                .range(1.0..=512.0)
+                                .clamp_existing_to_range(false)
+                                .speed(1.0),
+                        );
+                        if ui
+                            .button(lang.pick([
+                                "譜面から取得",
+                                "Get from chart",
+                                "從譜面取得",
+                                "채보에서 가져오기",
+                            ]))
+                            .clicked()
+                        {
+                            self.take_chart_timing();
+                        }
+                    });
+                    ui.end_row();
+
+                    ui.label(lang.pick(["拍子", "Time signature", "拍號", "박자"]));
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings.time_signature[0])
+                                .range(1..=16)
+                                .speed(1.0),
+                        );
+                        ui.label(egui::RichText::new("/").color(TEXT_MUTED));
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings.time_signature[1])
+                                .range(1..=480)
+                                .speed(1.0),
+                        );
+                    });
+                    ui.end_row();
+
+                    ui.label(lang.pick(["量子化", "Quantize", "量化", "퀀타이즈"]));
+                    self.settings.quantize_ticks = self.settings.quantize_ticks.clamp(1, 1920);
+                    let selected = QUANTIZE
+                        .iter()
+                        .find(|(ticks, _)| *ticks == self.settings.quantize_ticks)
+                        .map(|(_, name)| (*name).to_owned())
+                        .unwrap_or_else(|| format!("{} tick", self.settings.quantize_ticks));
+                    egui::ComboBox::from_id_salt("quantize")
+                        .width(ui.available_width().max(140.0))
+                        .selected_text(selected)
+                        .show_ui(ui, |ui| {
+                            for (ticks, name) in QUANTIZE {
+                                ui.selectable_value(
+                                    &mut self.settings.quantize_ticks,
+                                    *ticks,
+                                    *name,
+                                );
+                            }
+                        });
+                    ui.end_row();
+                });
+            if !self.bpm_note.is_empty() {
+                ui.add_space(2.0);
+                let notes: Vec<String> = self.bpm_note.iter().map(|note| note.text(lang)).collect();
+                ui.label(
+                    egui::RichText::new(notes.join(" / "))
+                        .size(11.5)
+                        .color(WARN_COLOR),
+                );
+            }
+        });
+        ui.add_space(6.0);
+        section_card(ui, |ui| {
+            self.field_controls(ui);
+            ui.add_space(4.0);
+            ui.separator();
+            ui.add_space(2.0);
+            self.output_controls(ui);
+        });
+        ui.add_space(6.0);
+        section_card(ui, |ui| {
+            let fine_rainbone = self.fine_rainbone();
+            if !fine_rainbone {
+                section_heading(
+                    ui,
+                    lang.pick([
+                        "スライドの種類",
+                        "Slide type",
+                        "Slide 類型",
+                        "슬라이드 종류",
+                    ]),
+                );
+                let half = ((ui.available_width() - ui.spacing().item_spacing.x) * 0.5).max(80.0);
+                ui.horizontal(|ui| {
+                    if segmented_choice(
+                        ui,
+                        !self.settings.symmetric_width,
+                        lang.pick(["普通の波形", "Normal waveform", "一般波形", "일반 파형"]),
+                        half,
+                    )
+                    .clicked()
+                    {
+                        self.settings.symmetric_width = false;
+                    }
+                    if segmented_choice(
+                        ui,
+                        self.settings.symmetric_width,
+                        lang.pick(["左右対称", "Symmetric", "左右對稱", "좌우 대칭"]),
+                        half,
+                    )
+                    .clicked()
+                    {
+                        self.settings.symmetric_width = true;
+                    }
+                });
+                ui.add_space(4.0);
+            }
+            if !self.settings.symmetric_width {
+                self.settings.max_width = self.settings.max_width.max(self.settings.width);
+            }
+            let maximum_span = if self.settings.extended_field
+                && (!self.settings.symmetric_width || fine_rainbone)
+            {
+                48
+            } else {
+                16
+            };
+            let slider_width = (ui.available_width() - 155.0).clamp(80.0, 220.0);
+            egui::Grid::new("waveform_sliders_grid")
+                .num_columns(2)
+                .spacing([10.0, 6.0])
+                .show(ui, |ui| {
+                    ui.spacing_mut().slider_width = slider_width;
+                    // Fine reproduction picks widths 1 and 2 itself, replacing the slide type and the width.
+                    if !fine_rainbone && !self.settings.symmetric_width {
+                        ui.label(lang.pick(["幅", "Width", "寬度", "폭"]));
+                        ui.add(egui::Slider::new(&mut self.settings.width, 1..=16));
+                        ui.end_row();
+                    }
+                    let max_width_hover = lang.pick([
+                        "波形全体の最大幅。普通の波形ではノート幅以上になります。",
+                        "Maximum width of the whole waveform. A normal waveform is at least as wide as the note width.",
+                        "整體波形的最大寬度。一般波形時不會小於音符寬度。",
+                        "파형 전체의 최대 폭입니다. 일반 파형에서는 노트 폭 이상이 됩니다.",
+                    ]);
+                    ui.label(lang.pick(["最大幅", "Max width", "最大寬度", "최대 폭"]))
+                        .on_hover_text(max_width_hover);
+                    ui.add(egui::Slider::new(
+                        &mut self.settings.max_width,
+                        2..=maximum_span,
+                    ))
+                    .on_hover_text(max_width_hover);
+                    ui.end_row();
+
+                    ui.label(lang.pick([
+                        "無音しきい値",
+                        "Silence threshold",
+                        "靜音閾值",
+                        "무음 임계값",
+                    ]));
+                    ui.add(egui::Slider::new(
+                        &mut self.settings.silence_threshold,
+                        0.0..=0.5,
+                    ));
+                    ui.end_row();
+
+                    ui.label(lang.pick(["平滑化", "Smoothing", "平滑化", "평활화"]));
+                    ui.add(egui::Slider::new(&mut self.settings.smooth, 0..=8));
+                    ui.end_row();
+                });
+            if !self.settings.symmetric_width && self.settings.max_width < self.settings.width {
+                self.settings.max_width = self.settings.width;
+                ui.ctx().request_repaint();
+            }
+            ui.add_space(4.0);
+            ui.separator();
+            ui.add_space(2.0);
+            if fine_rainbone || !self.settings.symmetric_width {
+                ui.checkbox(
+                    &mut self.settings.zigzag,
+                    lang.pick([
+                        "制御点を左右均等にする",
+                        "Balance control points left and right",
+                        "讓控制點左右均等",
+                        "제어점을 좌우 균등하게",
+                    ]),
+                );
+                ui.checkbox(
+                    &mut self.settings.center_ends,
+                    lang.pick([
+                        "始点と終点を中央にする",
+                        "Center the start and end",
+                        "起點與終點置中",
+                        "시작점과 끝점을 가운데로",
+                    ]),
+                );
+            }
+            ui.checkbox(
+                &mut self.settings.remove_silent_points,
+                lang.pick([
+                    "無音部分の制御点・中継点をなくす",
+                    "Remove control and step points in silent parts",
+                    "移除靜音部分的控制點與中繼點",
+                    "무음 구간의 제어점·중계점 없애기",
+                ]),
+            );
+            if !self.rainbone {
+                ui.checkbox(
+                    &mut self.transparent_steps,
+                    lang.pick([
+                        "中継点を透明にする（節を置かない）",
+                        "Make step points invisible (no joints)",
+                        "中繼點設為透明（不放置節點）",
+                        "중계점을 투명하게 (마디를 두지 않음)",
+                    ]),
+                );
+            }
+        });
+        self.refresh();
+        if self.audit.is_some() && !self.generated.slides.is_empty() {
+            ui.add_space(6.0);
+            self.audit_warnings(ui);
         }
+        ui.add_space(6.0);
     }
 }
 
@@ -949,32 +1313,31 @@ impl Sound2SlideApp<'_> {
 
     fn field_controls(&mut self, ui: &mut egui::Ui) {
         let lang = self.lang;
+        section_heading(ui, lang.pick(["フィールド", "Field", "遊戲區域", "필드"]));
+        let half = ((ui.available_width() - ui.spacing().item_spacing.x) * 0.5).max(80.0);
         ui.horizontal(|ui| {
-            ui.label(lang.pick(["フィールド", "Field", "遊戲區域", "필드"]));
-            egui::ComboBox::from_id_salt("field_mode")
-                .selected_text(self.field_mode.label(lang))
-                .show_ui(ui, |ui| {
-                    for mode in [FieldMode::Normal, FieldMode::Extended] {
-                        if ui
-                            .selectable_label(self.field_mode == mode, mode.label(lang))
-                            .clicked()
-                        {
-                            self.select_field_mode(mode);
-                        }
-                    }
-                });
+            for mode in [FieldMode::Normal, FieldMode::Extended] {
+                if segmented_choice(ui, self.field_mode == mode, mode.label(lang), half).clicked() {
+                    self.select_field_mode(mode);
+                }
+            }
         });
         if !self.field_manually_selected {
             if !self.chart_files.is_empty() {
                 let mut selected = self.selected_chart.clone();
-                ui.label(lang.pick([
-                    "判定元の譜面",
-                    "Chart for detection",
-                    "判定來源譜面",
-                    "판정할 채보",
-                ]));
+                ui.add_space(2.0);
+                ui.label(
+                    egui::RichText::new(lang.pick([
+                        "判定元の譜面",
+                        "Chart for detection",
+                        "判定來源譜面",
+                        "판정할 채보",
+                    ]))
+                    .size(11.5)
+                    .color(TEXT_MUTED),
+                );
                 egui::ComboBox::from_id_salt("field_chart")
-                    .width(180.0)
+                    .width(ui.available_width().max(140.0))
                     .selected_text(
                         selected
                             .as_ref()
@@ -1004,12 +1367,16 @@ impl Sound2SlideApp<'_> {
                 }
             }
             if self.selected_chart.is_some() {
-                ui.small(lang.pick([
-                    "保存済みの設定を参照します。未保存の変更は反映されません。",
-                    "Uses saved settings; unsaved changes are not reflected.",
-                    "使用已儲存的設定，不反映尚未儲存的變更。",
-                    "저장된 설정을 사용하며 저장하지 않은 변경은 반영되지 않습니다.",
-                ]));
+                ui.label(
+                    egui::RichText::new(lang.pick([
+                        "保存済みの設定を参照します。未保存の変更は反映されません。",
+                        "Uses saved settings; unsaved changes are not reflected.",
+                        "使用已儲存的設定，不反映尚未儲存的變更。",
+                        "저장된 설정을 사용하며 저장하지 않은 변경은 반영되지 않습니다.",
+                    ]))
+                    .size(11.0)
+                    .color(TEXT_MUTED),
+                );
             }
         }
         self.sync_field_mode();
@@ -1017,25 +1384,37 @@ impl Sound2SlideApp<'_> {
 
     fn output_controls(&mut self, ui: &mut egui::Ui) {
         let lang = self.lang;
+        section_heading(ui, lang.pick(["出力", "Output", "輸出", "출력"]));
+        let half = ((ui.available_width() - ui.spacing().item_spacing.x) * 0.5).max(80.0);
         ui.horizontal(|ui| {
-            ui.label(lang.pick(["出力", "Output", "輸出", "출력"]));
-            ui.radio_value(
-                &mut self.rainbone,
-                false,
+            if segmented_choice(
+                ui,
+                !self.rainbone,
                 lang.pick(["スライド", "Slide", "Slide", "슬라이드"]),
-            );
-            ui.radio_value(
-                &mut self.rainbone,
-                true,
+                half,
+            )
+            .clicked()
+            {
+                self.rainbone = false;
+            }
+            if segmented_choice(
+                ui,
+                self.rainbone,
                 lang.pick(["レインボーン", "Rainbone", "Rainbone", "레인본"]),
+                half,
             )
             .on_hover_text(lang.pick([
                 "AIR-CRUSH のノーツを置かず、空中の線だけを追加します。",
                 "Adds only the air line of an AIR-CRUSH, without crush notes.",
                 "不放置 AIR-CRUSH 音符，只加入空中的線。",
                 "AIR-CRUSH 노트 없이 공중의 선만 추가합니다.",
-            ]));
+            ]))
+            .clicked()
+            {
+                self.rainbone = true;
+            }
         });
+        ui.add_space(2.0);
         if !self.rainbone {
             ui.checkbox(
                 &mut self.slide_no_center_line,
@@ -1048,38 +1427,53 @@ impl Sound2SlideApp<'_> {
             );
             return;
         }
-        ui.horizontal(|ui| {
-            ui.label(lang.pick(["線の軸", "Line axis", "線的軸向", "선 축"]));
-            egui::ComboBox::from_id_salt("rainbone_axis")
-                .selected_text(self.rainbone_axis.label(lang))
-                .show_ui(ui, |ui| {
-                    for axis in [rainbone::Axis::X, rainbone::Axis::Y, rainbone::Axis::Z] {
-                        ui.selectable_value(&mut self.rainbone_axis, axis, axis.label(lang));
-                    }
-                })
-                .response
-                .on_hover_text(lang.pick([
-                    "線の描画軸を指定します。プレビューは配置経路を表示し、軸による立体的な描画の違いは再現しません。",
-                    "Sets the line rendering axis. The preview shows the path, without reproducing its 3D orientation.",
-                    "指定線的繪製軸向。預覽顯示配置路徑，不重現軸向造成的立體繪製差異。",
-                    "선의 렌더링 축을 지정합니다. 미리보기는 배치 경로를 표시하며 축에 따른 입체 표현 차이는 재현하지 않습니다.",
-                ]));
-        });
-        ui.horizontal(|ui| {
-            ui.label(lang.pick(["線の色", "Line color", "線的顏色", "선 색"]));
-            let selected = rainbone::color(self.rainbone_color);
-            egui::ComboBox::from_id_salt("rainbone_color")
-                .selected_text(line_color_text(selected, lang))
-                .show_ui(ui, |ui| {
-                    for color in rainbone::COLORS {
-                        ui.selectable_value(
-                            &mut self.rainbone_color,
-                            color.id,
-                            line_color_text(color, lang),
-                        );
-                    }
-                });
-        });
+        egui::Grid::new("rainbone_grid")
+            .num_columns(2)
+            .spacing([10.0, 6.0])
+            .show(ui, |ui| {
+                ui.label(lang.pick(["線の軸", "Line axis", "線的軸向", "선 축"]));
+                egui::ComboBox::from_id_salt("rainbone_axis")
+                    .width(ui.available_width().max(140.0))
+                    .selected_text(self.rainbone_axis.label(lang))
+                    .show_ui(ui, |ui| {
+                        for axis in [rainbone::Axis::X, rainbone::Axis::Y, rainbone::Axis::Z] {
+                            ui.selectable_value(&mut self.rainbone_axis, axis, axis.label(lang));
+                        }
+                    })
+                    .response
+                    .on_hover_text(lang.pick([
+                        "線の描画軸を指定します。プレビューは配置経路を表示し、軸による立体的な描画の違いは再現しません。",
+                        "Sets the line rendering axis. The preview shows the path, without reproducing its 3D orientation.",
+                        "指定線的繪製軸向。預覽顯示配置路徑，不重現軸向造成的立體繪製差異。",
+                        "선의 렌더링 축을 지정합니다. 미리보기는 배치 경로를 표시하며 축에 따른 입체 표현 차이는 재현하지 않습니다.",
+                    ]));
+                ui.end_row();
+
+                ui.label(lang.pick(["線の色", "Line color", "線的顏色", "선 색"]));
+                let selected = rainbone::color(self.rainbone_color);
+                egui::ComboBox::from_id_salt("rainbone_color")
+                    .width(ui.available_width().max(140.0))
+                    .selected_text(line_color_text(selected, lang))
+                    .show_ui(ui, |ui| {
+                        for color in rainbone::COLORS {
+                            ui.selectable_value(
+                                &mut self.rainbone_color,
+                                color.id,
+                                line_color_text(color, lang),
+                            );
+                        }
+                    });
+                ui.end_row();
+
+                ui.label(lang.pick(["高さ", "Height", "高度", "높이"]));
+                ui.add(
+                    egui::DragValue::new(&mut self.rainbone_height)
+                        .range(0..=rainbone::MAX_HEIGHT)
+                        .speed(1.0),
+                );
+                ui.end_row();
+            });
+        ui.add_space(2.0);
         ui.checkbox(
             &mut self.rainbone_fine,
             lang.pick([
@@ -1095,23 +1489,46 @@ impl Sound2SlideApp<'_> {
             "線會畫在音符的中央。交替使用 1 寬與 2 寬，讓線同時落在軌道中央與軌道交界。",
             "선은 노트의 가운데를 지납니다. 1폭과 2폭을 섞어 선을 레인 가운데와 경계 양쪽에 올립니다.",
         ]));
-        ui.horizontal(|ui| {
-            ui.label(lang.pick(["高さ", "Height", "高度", "높이"]));
-            ui.add(
-                egui::DragValue::new(&mut self.rainbone_height)
-                    .range(0..=rainbone::MAX_HEIGHT)
-                    .speed(1.0),
-            );
-        });
     }
 }
 
-fn line_color_text(color: &rainbone::LineColor, lang: Lang) -> egui::RichText {
-    let text = format!("({}) {}", color.key, lang.pick(color.names));
+fn line_color_text(color: &rainbone::LineColor, lang: Lang) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    let font_id = egui::FontId::proportional(13.0);
     match color.rgb {
-        Some([r, g, b]) => egui::RichText::new(text).color(egui::Color32::from_rgb(r, g, b)),
-        None => egui::RichText::new(text),
+        Some([r, g, b]) => {
+            job.append(
+                "● ",
+                0.0,
+                egui::TextFormat {
+                    font_id: font_id.clone(),
+                    color: egui::Color32::from_rgb(r, g, b),
+                    ..Default::default()
+                },
+            );
+        }
+        None => {
+            job.append(
+                "○ ",
+                0.0,
+                egui::TextFormat {
+                    font_id: font_id.clone(),
+                    color: TEXT_MUTED,
+                    ..Default::default()
+                },
+            );
+        }
     }
+    job.append(
+        &format!("({}) {}", color.key, lang.pick(color.names)),
+        0.0,
+        egui::TextFormat {
+            font_id,
+            color: TEXT_PRIMARY,
+            ..Default::default()
+        },
+    );
+    job
 }
 
 fn event_walking_back<T>(
@@ -1171,10 +1588,13 @@ impl Sound2SlideApp<'_> {
             .inner;
         let lang = self.lang;
         if let Some(error) = &self.playback_error {
-            ui.colored_label(egui::Color32::LIGHT_RED, error.text(lang));
+            ui.colored_label(egui::Color32::from_rgb(255, 118, 118), error.text(lang));
         }
         ui.horizontal(|ui| {
-            ui.label(lang.pick(["表示設定", "Display", "顯示設定", "표시 설정"]));
+            ui.label(
+                egui::RichText::new(lang.pick(["表示設定", "Display", "顯示設定", "표시 설정"]))
+                    .color(TEXT_MUTED),
+            );
             egui::ComboBox::from_id_salt("lane_divisions")
                 .selected_text(lane_division_label(self.lane_divisions, lang))
                 .show_ui(ui, |ui| {
@@ -1186,6 +1606,37 @@ impl Sound2SlideApp<'_> {
                         );
                     }
                 });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if self.editing_silent_zones {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(lang.pick([
+                                "サイレントゾーン編集中",
+                                "Editing silent zones",
+                                "正在編輯靜音區",
+                                "무음 구간 편집 중",
+                            ]))
+                            .size(11.5)
+                            .color(ACCENT_BRIGHT),
+                        )
+                        .truncate(),
+                    );
+                } else if self.audio.is_some() {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(lang.pick([
+                                "Space: 再生/一時停止",
+                                "Space: Play/Pause",
+                                "Space：播放/暫停",
+                                "Space: 재생/일시 정지",
+                            ]))
+                            .size(11.5)
+                            .color(TEXT_MUTED),
+                        )
+                        .truncate(),
+                    );
+                }
+            });
         });
         ui.separator();
         response
@@ -1518,16 +1969,21 @@ impl Sound2SlideApp<'_> {
 
     fn playback_controls(&mut self, ui: &mut egui::Ui) {
         let lang = self.lang;
-        let label = match self.playback.as_ref() {
-            Some(playback) if !playback.is_finished() && !playback.is_paused() => {
-                lang.pick(["一時停止", "Pause", "暫停", "일시 정지"])
-            }
-            _ => lang.pick(["再生", "Play", "播放", "재생"]),
+        let playing = self
+            .playback
+            .as_ref()
+            .is_some_and(|playback| !playback.is_finished() && !playback.is_paused());
+        let label = if playing {
+            lang.pick(["一時停止", "Pause", "暫停", "일시 정지"])
+        } else {
+            lang.pick(["再生", "Play", "播放", "재생"])
         };
-        if ui
-            .add_enabled(self.can_play(), egui::Button::new(label))
-            .clicked()
-        {
+        let play_button = if playing {
+            primary_button(label, true)
+        } else {
+            egui::Button::new(label)
+        };
+        if ui.add_enabled(self.can_play(), play_button).clicked() {
             self.toggle_playback();
         }
         if ui
@@ -1544,12 +2000,28 @@ impl Sound2SlideApp<'_> {
             .as_ref()
             .map(|playback| (playback.position_sec() - playback.offset_sec).max(0.0))
             .unwrap_or(0.0);
-        ui.label(lang.pick([
-            format!("{elapsed:.3} 秒"),
-            format!("{elapsed:.3} s"),
-            format!("{elapsed:.3} 秒"),
-            format!("{elapsed:.3}초"),
-        ]));
+        egui::Frame::new()
+            .fill(BG_INPUT)
+            .stroke(egui::Stroke::new(1.0, BORDER_SUBTLE))
+            .corner_radius(egui::CornerRadius::same(4))
+            .inner_margin(egui::Margin::symmetric(6, 2))
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new(lang.pick([
+                        format!("{elapsed:.3} 秒"),
+                        format!("{elapsed:.3} s"),
+                        format!("{elapsed:.3} 秒"),
+                        format!("{elapsed:.3}초"),
+                    ]))
+                    .monospace()
+                    .size(12.0)
+                    .color(if self.playback.is_some() {
+                        TEXT_PRIMARY
+                    } else {
+                        TEXT_MUTED
+                    }),
+                );
+            });
         if let Some(playback) = &self.playback {
             let interval_ms = if playback.is_paused() { 100 } else { 16 };
             ui.ctx()
@@ -1578,23 +2050,21 @@ impl eframe::App for Sound2SlideApp<'_> {
         self.refresh();
         egui::Panel::left("controls")
             .resizable(true)
-            .min_size(260.0)
-            .default_size(300.0)
+            .min_size(300.0)
+            .default_size(348.0)
             .show(ui, |ui| {
                 ui.add_enabled_ui(
                     self.offset_selection.is_none() && !self.update_dialog_open,
                     |ui| {
-                        egui::Panel::bottom("open_source_libraries_footer")
+                        egui::Panel::top("controls_header")
                             .resizable(false)
-                            .show(ui, |ui| {
-                                if let Some(available) = &self.update_available {
-                                    update::footer(ui, available, self.lang);
-                                }
-                                if ui.button(crate::oss::title(self.lang)).clicked() {
-                                    self.show_open_source_libraries = true;
-                                }
-                            });
-                        egui::ScrollArea::vertical().show(ui, |ui| self.controls(ui, frame));
+                            .show(ui, |ui| self.controls_header(ui));
+                        egui::Panel::bottom("controls_footer")
+                            .resizable(false)
+                            .show(ui, |ui| self.controls_footer(ui));
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| self.controls(ui, frame));
                     },
                 );
             });
@@ -1637,6 +2107,7 @@ impl eframe::App for Sound2SlideApp<'_> {
                 self.lane_divisions,
                 self.playback.as_ref().map(Playback::position_sec),
                 &self.silent_zones,
+                self.editing_silent_zones,
                 self.lang,
             );
             if self.editing_silent_zones {
@@ -1755,6 +2226,7 @@ fn lane_fraction(lane: f32, extended: bool) -> f32 {
     ((lane - left) / span).clamp(0.0, 1.0)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_preview(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -1767,21 +2239,39 @@ fn paint_preview(
     lane_divisions: i32,
     playback_position_sec: Option<f64>,
     silent_zones: &[SilentZone],
+    editing_silent_zones: bool,
     lang: Lang,
 ) {
     painter.rect_filled(
         rect,
-        egui::CornerRadius::ZERO,
-        egui::Color32::from_rgb(16, 18, 26),
+        egui::CornerRadius::same(6),
+        egui::Color32::from_rgb(13, 15, 22),
+    );
+    painter.rect_stroke(
+        rect,
+        egui::CornerRadius::same(6),
+        egui::Stroke::new(1.0, BORDER_SUBTLE),
+        egui::StrokeKind::Inside,
     );
     let inner = rect.shrink(16.0);
     let Some(audio) = audio else {
+        painter.rect_filled(
+            inner,
+            egui::CornerRadius::same(4),
+            egui::Color32::from_rgb(18, 21, 30),
+        );
+        painter.rect_stroke(
+            inner,
+            egui::CornerRadius::same(4),
+            egui::Stroke::new(1.0, BORDER_SUBTLE),
+            egui::StrokeKind::Inside,
+        );
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
             Msg::OpenAudioPrompt.text(lang),
-            egui::FontId::proportional(18.0),
-            egui::Color32::GRAY,
+            egui::FontId::proportional(16.0),
+            TEXT_MUTED,
         );
         return;
     };
@@ -1793,11 +2283,33 @@ fn paint_preview(
     else {
         return;
     };
+    painter.rect_filled(
+        inner,
+        egui::CornerRadius::ZERO,
+        egui::Color32::from_rgb(19, 23, 33),
+    );
     let span = view_end - view_start;
     let time_y = |time: f64| -> f32 {
         let t = ((time - view_start) / span) as f32;
         inner.bottom() - t.clamp(0.0, 1.0) * inner.height()
     };
+    let lane_x = |lane: f32| -> f32 {
+        let t = lane_fraction(lane, settings.extended_field);
+        inner.left() + t * inner.width()
+    };
+    if settings.extended_field {
+        let wing_fill = egui::Color32::from_black_alpha(52);
+        painter.rect_filled(
+            egui::Rect::from_min_max(inner.left_top(), egui::pos2(lane_x(0.0), inner.bottom())),
+            egui::CornerRadius::ZERO,
+            wing_fill,
+        );
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(lane_x(16.0), inner.top()), inner.right_bottom()),
+            egui::CornerRadius::ZERO,
+            wing_fill,
+        );
+    }
     for zone in silent_zones {
         if zone.end_sec <= 0.0 || zone.start_sec >= span {
             continue;
@@ -1817,12 +2329,15 @@ fn paint_preview(
                 [egui::pos2(inner.left(), y), egui::pos2(inner.right(), y)],
                 egui::Stroke::new(1.5, egui::Color32::from_rgb(100, 190, 245)),
             );
+            if editing_silent_zones {
+                let cx = inner.center().x;
+                painter.line_segment(
+                    [egui::pos2(cx - 14.0, y), egui::pos2(cx + 14.0, y)],
+                    egui::Stroke::new(3.0, egui::Color32::from_rgb(160, 222, 255)),
+                );
+            }
         }
     }
-    let lane_x = |lane: f32| -> f32 {
-        let t = lane_fraction(lane, settings.extended_field);
-        inner.left() + t * inner.width()
-    };
     if lane_divisions > 0 {
         let panels = if settings.extended_field { 3 } else { 1 };
         let left = if settings.extended_field { -16.0 } else { 0.0 };
@@ -1830,16 +2345,24 @@ fn paint_preview(
             let x = lane_x(left + division as f32 * 16.0 / lane_divisions as f32);
             painter.line_segment(
                 [egui::pos2(x, inner.top()), egui::pos2(x, inner.bottom())],
-                egui::Stroke::new(1.0, egui::Color32::from_white_alpha(16)),
+                egui::Stroke::new(1.0, egui::Color32::from_white_alpha(18)),
             );
         }
     }
+    let center_x = lane_x(8.0);
+    painter.line_segment(
+        [
+            egui::pos2(center_x, inner.top()),
+            egui::pos2(center_x, inner.bottom()),
+        ],
+        egui::Stroke::new(1.0, egui::Color32::from_white_alpha(30)),
+    );
     if settings.extended_field {
         for lane in [0.0, 16.0] {
             let x = lane_x(lane);
             painter.line_segment(
                 [egui::pos2(x, inner.top()), egui::pos2(x, inner.bottom())],
-                egui::Stroke::new(1.5, egui::Color32::from_rgb(100, 155, 205)),
+                egui::Stroke::new(1.5, egui::Color32::from_rgb(100, 165, 220)),
             );
         }
     }
@@ -1854,7 +2377,7 @@ fn paint_preview(
         let stroke = if is_bar {
             egui::Stroke::new(1.5, egui::Color32::from_white_alpha(96))
         } else {
-            egui::Stroke::new(1.0, egui::Color32::from_white_alpha(32))
+            egui::Stroke::new(1.0, egui::Color32::from_white_alpha(30))
         };
         painter.line_segment(
             [egui::pos2(inner.left(), y), egui::pos2(inner.right(), y)],
@@ -1887,12 +2410,42 @@ fn paint_preview(
             &time_y,
         );
     }
+    let field_border = if editing_silent_zones {
+        egui::Stroke::new(1.5, ACCENT_BRIGHT)
+    } else {
+        egui::Stroke::new(1.0, BORDER_SUBTLE)
+    };
+    painter.rect_stroke(
+        inner,
+        egui::CornerRadius::ZERO,
+        field_border,
+        egui::StrokeKind::Outside,
+    );
     if let Some(position) = playback_position_sec {
         let y = time_y(position);
+        let playhead = egui::Color32::from_rgb(255, 64, 64);
         painter.line_segment(
             [egui::pos2(inner.left(), y), egui::pos2(inner.right(), y)],
-            egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 48, 48)),
+            egui::Stroke::new(2.0, playhead),
         );
+        painter.add(egui::Shape::convex_polygon(
+            vec![
+                egui::pos2(inner.left() - 7.0, y - 4.0),
+                egui::pos2(inner.left(), y),
+                egui::pos2(inner.left() - 7.0, y + 4.0),
+            ],
+            playhead,
+            egui::Stroke::NONE,
+        ));
+        painter.add(egui::Shape::convex_polygon(
+            vec![
+                egui::pos2(inner.right() + 7.0, y - 4.0),
+                egui::pos2(inner.right() + 7.0, y + 4.0),
+                egui::pos2(inner.right(), y),
+            ],
+            playhead,
+            egui::Stroke::NONE,
+        ));
     }
 }
 
